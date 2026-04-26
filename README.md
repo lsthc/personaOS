@@ -133,6 +133,9 @@ speak the same IPC ABI.
 
 ### The bootloader — `personaboot`
 
+<img width="1774" height="887" alt="image" src="https://github.com/user-attachments/assets/94d9243b-7265-41db-b455-31af118a06a8" />
+
+
 A UEFI application, written in Rust. On power-on, firmware loads
 `personaboot` from `\EFI\BOOT\BOOTX64.EFI`. `personaboot`:
 
