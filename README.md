@@ -132,9 +132,10 @@ speak the same IPC ABI.
   hot paths remain in-kernel.
 
 ### The bootloader — `personaboot`
-
-<img width="1774" height="887" alt="image" src="https://github.com/user-attachments/assets/94d9243b-7265-41db-b455-31af118a06a8" />
-
+<div align="center">
+<img width="707" height="353" alt="image-removebg-preview (7)" src="https://github.com/user-attachments/assets/8cff8da7-e7fd-4c73-a9e2-e9f982c01a8c" />
+</div>
+<br>
 
 A UEFI application, written in Rust. On power-on, firmware loads
 `personaboot` from `\EFI\BOOT\BOOTX64.EFI`. `personaboot`:
