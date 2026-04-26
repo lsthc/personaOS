@@ -1,0 +1,18 @@
+[package]
+name = "kernel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "kernel"
+path = "src/main.rs"
+
+[dependencies]
+persona-shared = { workspace = true }
+spin = { version = "0.9", default-features = false, features = ["mutex", "spin_mutex"] }
+log = "0.4"
+
+[package.metadata.docs.rs]
+default-target = "x86_64-personaos-kernel"

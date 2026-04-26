@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "kernel",
+    "bootloader",
+    "libs/shared",
+]
+
+[workspace.package]
+edition = "2021"
+version = "0.0.1"
+authors = ["personaOS contributors"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+persona-shared = { path = "libs/shared" }
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+debug = true
+
+[profile.release]
+panic = "abort"
+opt-level = 3
+debug = true
+lto = "thin"
+codegen-units = 1

@@ -1,0 +1,21 @@
+[package]
+name = "personaboot"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "personaboot"
+path = "src/main.rs"
+
+[dependencies]
+persona-shared = { workspace = true }
+uefi = { version = "0.31", features = ["alloc", "panic_handler", "logger"] }
+uefi-services = "0.28"
+xmas-elf = { version = "0.9", default-features = false }
+x86_64 = "0.15"
+log = "0.4"
+
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-uefi"

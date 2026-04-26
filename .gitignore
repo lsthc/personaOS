@@ -1,0 +1,13 @@
+/target
+/build
+*.img
+*.iso
+*.efi
+*.elf
+*.o
+*.a
+.DS_Store
+**/Cargo.lock.bak
+
+# OVMF firmware copies
+/OVMF*.fd
