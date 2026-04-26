@@ -2,8 +2,6 @@
 
 <img src="https://raw.githubusercontent.com/lsthc/personaOS/refs/heads/main/images/IMG_0698.png" alt="personaOS" />
 
-# personaOS
-
 **Your computer, actually yours.**
 
 A desktop operating system built around the person using it — written from scratch in Rust.
