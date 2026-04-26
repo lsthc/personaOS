@@ -131,9 +131,9 @@ speak the same IPC ABI.
   Intel HDA. Graphics drivers run in userspace; block and interrupt
   hot paths remain in-kernel.
 
-<div align="center">
 ### The bootloader — `personaboot`
 
+<div align="center">
 <img width="707" height="353" alt="image-removebg-preview (7)" src="https://github.com/user-attachments/assets/8cff8da7-e7fd-4c73-a9e2-e9f982c01a8c" />
 </div>
 <br>
