@@ -19,7 +19,7 @@ impl SerialPort {
         unsafe {
             outb(self.base + 1, 0x00); // disable interrupts
             outb(self.base + 3, 0x80); // enable DLAB
-            outb(self.base + 0, 0x01); // divisor low (115200 baud)
+            outb(self.base, 0x01); // divisor low (115200 baud)
             outb(self.base + 1, 0x00); // divisor high
             outb(self.base + 3, 0x03); // 8N1
             outb(self.base + 2, 0xC7); // FIFO enable, clear, 14-byte threshold
@@ -46,6 +46,7 @@ impl SerialPort {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn write_dec_u32(&mut self, mut v: u32) -> fmt::Result {
         let mut buf = [0u8; 10];
         let mut i = buf.len();
@@ -64,6 +65,7 @@ impl SerialPort {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn write_fmt_args(&mut self, args: fmt::Arguments<'_>) -> fmt::Result {
         fmt::write(self, args)
     }

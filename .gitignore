@@ -1,4 +1,5 @@
 /target
+**/target
 /build
 *.img
 *.iso
@@ -11,3 +12,12 @@
 
 # OVMF firmware copies
 /OVMF*.fd
+
+# Unpublished changelog drafts. Files here are promoted up to
+# /changelog/ by tools/gen-changelog-manifest.py once their publishAt
+# arrives, at which point they become visible to git.
+/changelog/_drafts/
+
+# Python bytecode from the manifest generator.
+__pycache__/
+*.pyc

@@ -11,8 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 persona-shared = { workspace = true }
-uefi = { version = "0.31", features = ["alloc", "panic_handler", "logger"] }
-uefi-services = "0.28"
+uefi = { version = "0.37", default-features = false, features = ["alloc", "panic_handler", "logger", "global_allocator"] }
 xmas-elf = { version = "0.9", default-features = false }
 x86_64 = "0.15"
 log = "0.4"

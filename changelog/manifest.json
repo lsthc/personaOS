@@ -1,0 +1,26 @@
+[
+  {
+    "file": "0003-deep-current.md",
+    "build": 3,
+    "codename": "Deep Current",
+    "version": "0.1.0",
+    "date": "2026-04-26",
+    "summary": "M2 pipeline lands — PCI enumeration, VFS, NVMe block driver, PondFS (RW), real ELF init, and an expanded syscall surface."
+  },
+  {
+    "file": "0002-stillwater.md",
+    "build": 2,
+    "codename": "Stillwater",
+    "version": "0.0.3",
+    "date": "2026-04-26",
+    "summary": "Warning-free build — kernel and bootloader now pass `cargo clippy -- -D warnings`, plus a stable-feature and raw-pointer cleanup pass."
+  },
+  {
+    "file": "0001-ripple.md",
+    "build": 1,
+    "codename": "Ripple",
+    "version": "0.0.2",
+    "date": "2026-04-26",
+    "summary": "Boot path is sound again — fixes the HHDM-before-CR3 fault, a nightly build break, and several correctness landmines."
+  }
+]

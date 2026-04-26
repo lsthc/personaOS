@@ -5,6 +5,8 @@
 //!
 //! Each glyph is 16 rows of 8 bits; bit 0x80 is the leftmost pixel.
 
+#![allow(non_upper_case_globals)]
+
 const MISSING: [u8; 16] = [
     0x00, 0x7E, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x7E, 0x00, 0x00, 0x00,
 ];
@@ -128,6 +130,7 @@ const LETTER_y: [u8; 16] = g!(
 );
 
 // Digits
+#[allow(dead_code)] // '0' maps to DIGIT_M0 today; DIGIT_0 kept for future use.
 const DIGIT_0: [u8; 16] = LETTER_O;
 const DIGIT_1: [u8; 16] = g!(
     0, 0,
@@ -191,6 +194,3 @@ pub fn glyph(ch: char) -> [u8; 16] {
     }
 }
 
-// Suppress unused warnings for glyphs kept for future reuse.
-#[allow(dead_code)]
-const _UNUSED: [[u8; 16]; 1] = [DIGIT_0];

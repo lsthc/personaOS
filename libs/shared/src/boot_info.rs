@@ -6,7 +6,8 @@
 //! higher-half direct map (HHDM). The kernel takes ownership of these
 //! regions on entry; the bootloader does not run again.
 
-pub const BOOT_INFO_MAGIC: u64 = 0x506F_6E64_4F53_42_00; // "PondOSB\0"
+/// ASCII "PondOSB\0" as a little-endian u64 (`P` is the lowest-addressed byte).
+pub const BOOT_INFO_MAGIC: u64 = u64::from_le_bytes(*b"PondOSB\0");
 pub const BOOT_INFO_VERSION: u32 = 1;
 
 /// Offset at which the bootloader maps all physical memory in the kernel's
@@ -80,12 +81,14 @@ pub struct MemoryRegion {
 pub enum MemoryKind {
     /// Conventional RAM, free for the kernel's physical frame allocator.
     Usable = 0,
-    /// Contains UEFI boot services data that the kernel may reclaim later.
+    /// Contains UEFI boot-services / bootloader data that the kernel may
+    /// reclaim once it no longer needs the handoff structures.
     BootloaderReclaimable = 1,
     /// Kernel image (code + data). Must not be reclaimed.
     KernelAndModules = 2,
-    /// UEFI runtime services. Keep mapped.
+    /// ACPI tables the kernel may reclaim after parsing.
     AcpiReclaimable = 3,
+    /// ACPI non-volatile storage. Keep mapped.
     AcpiNvs = 4,
     /// Reserved / memory-mapped devices. Do not touch.
     Reserved = 5,

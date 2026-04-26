@@ -1,59 +1,59 @@
 //! personaboot — UEFI bootloader for personaOS.
 //!
 //! Responsibilities:
-//!   1. Obtain a linear framebuffer via the Graphics Output Protocol (GOP).
-//!   2. Read `\EFI\personaOS\kernel.elf` from the EFI System Partition (ESP).
+//!   1. Obtain a linear framebuffer via GOP.
+//!   2. Read `\EFI\personaOS\kernel.elf` from the ESP.
 //!   3. Parse the ELF and allocate physical memory for each PT_LOAD segment.
 //!   4. Build fresh page tables: identity map the low 4 GiB (for firmware),
-//!      map all physical memory at the higher-half direct map (HHDM), and
-//!      map kernel segments at their linked virtual addresses.
+//!      HHDM for all physical memory, and kernel segments at their
+//!      linked addresses.
 //!   5. Locate the ACPI RSDP in the UEFI configuration table.
-//!   6. Construct a `BootInfo` struct.
-//!   7. Call `ExitBootServices`, install the new CR3, switch to the kernel
-//!      stack, and jump to the kernel entry point.
+//!   6. Construct a `BootInfo`.
+//!   7. Call `exit_boot_services`, install CR3, switch to the kernel stack,
+//!      and jump to the kernel.
 
 #![no_main]
 #![no_std]
-#![feature(abi_efiapi)]
 
 extern crate alloc;
 
 use alloc::vec::Vec;
 use core::arch::asm;
 use core::ptr;
-use core::slice;
 
 use persona_shared::{
     BootInfo, Framebuffer, MemoryKind, MemoryMap, MemoryRegion, PixelFormat, BOOT_INFO_MAGIC,
     BOOT_INFO_VERSION, HHDM_OFFSET,
 };
+use uefi::boot::{self, AllocateType, MemoryType, ScopedProtocol};
+use uefi::mem::memory_map::MemoryMap as UefiMemoryMap;
 use uefi::prelude::*;
 use uefi::proto::console::gop::{GraphicsOutput, PixelFormat as GopPixelFormat};
 use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode, RegularFile};
 use uefi::proto::media::fs::SimpleFileSystem;
-use uefi::table::boot::{AllocateType, MemoryType};
-use uefi::table::cfg::{ACPI2_GUID, ACPI_GUID};
+use uefi::system;
+use uefi::table::cfg::ConfigTableEntry;
 use uefi::CStr16;
-use x86_64::registers::control::{Cr0, Cr0Flags, Cr3, Cr3Flags, Cr4, Cr4Flags};
-use x86_64::structures::paging::{
-    page_table::PageTableFlags as PTF, PageTable, PhysFrame, Size4KiB,
-};
+use x86_64::registers::control::{Cr3, Cr3Flags};
+use x86_64::structures::paging::{page_table::PageTableFlags as PTF, PageTable, PhysFrame};
 use x86_64::{PhysAddr, VirtAddr};
 use xmas_elf::program::{ProgramHeader, Type as PhType};
 use xmas_elf::ElfFile;
 
 const KERNEL_PATH: &str = "\\EFI\\personaOS\\kernel.elf";
 const KERNEL_STACK_SIZE: usize = 64 * 1024;
-/// Identity-map the first 4 GiB so that firmware / MMIO remains reachable
-/// immediately after switching to our page tables. Production will trim this.
+/// Identity-map the first 4 GiB so firmware / MMIO remains reachable
+/// immediately after switching to our page tables.
 const IDENTITY_MAP_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
+const MMAP_PAGES: usize = 16;
+
 #[entry]
-fn efi_main(image: Handle, mut st: SystemTable<Boot>) -> Status {
-    uefi_services::init(&mut st).expect("uefi_services init");
+fn efi_main() -> Status {
+    uefi::helpers::init().expect("uefi helpers init");
     log::info!("[personaboot] hello, world");
 
-    let fb = init_framebuffer(st.boot_services());
+    let fb = init_framebuffer();
     log::info!(
         "[personaboot] framebuffer {}x{} pitch={} bpp={}",
         fb.width,
@@ -62,42 +62,50 @@ fn efi_main(image: Handle, mut st: SystemTable<Boot>) -> Status {
         fb.bits_per_pixel
     );
 
-    let kernel_bytes = load_kernel(image, st.boot_services());
-    log::info!("[personaboot] loaded kernel.elf: {} bytes", kernel_bytes.len());
+    let kernel_bytes = load_kernel();
+    log::info!(
+        "[personaboot] loaded kernel.elf: {} bytes",
+        kernel_bytes.len()
+    );
 
     let elf = ElfFile::new(&kernel_bytes).expect("parse kernel ELF");
     let entry_point = elf.header.pt2.entry_point();
     log::info!("[personaboot] kernel entry = {:#x}", entry_point);
 
-    let stack_phys = alloc_pages(st.boot_services(), pages_for(KERNEL_STACK_SIZE as u64));
+    let stack_phys = alloc_pages(pages_for(KERNEL_STACK_SIZE as u64));
     let stack_top_virt = HHDM_OFFSET + stack_phys + KERNEL_STACK_SIZE as u64;
     log::info!("[personaboot] kernel stack top = {:#x}", stack_top_virt);
 
-    let rsdp = find_rsdp(&st);
+    let rsdp = find_rsdp();
     log::info!("[personaboot] rsdp = {:#x}", rsdp);
 
-    // Build page tables BEFORE exiting boot services (we need the allocator).
-    let (pml4_phys, _loaded) = build_page_tables(st.boot_services(), &elf, &fb);
+    let (pml4_phys, _loaded) = build_page_tables(&elf, &fb);
     log::info!("[personaboot] pml4 @ {:#x}", pml4_phys);
 
-    // Allocate and fill the BootInfo + memory-map storage in boot-services
-    // memory that we'll mark as BootloaderReclaimable.
-    let boot_info_phys = alloc_pages(st.boot_services(), 1);
-    let mmap_entries_phys = alloc_pages(st.boot_services(), 16); // up to ~32k entries
+    // Allocate BootInfo + memory-map storage. These are written through the
+    // identity map while firmware's page tables are active; the kernel will
+    // read them through the HHDM after CR3 is installed.
+    let boot_info_phys = alloc_pages(1);
+    let mmap_entries_phys = alloc_pages(MMAP_PAGES);
+    let mmap_capacity = (MMAP_PAGES * 4096) / core::mem::size_of::<MemoryRegion>();
 
-    // Exit boot services. From here on, no more prints or allocations.
-    let (_runtime_st, mmap) = st.exit_boot_services(MemoryType::LOADER_DATA);
+    // From here on, no more prints or allocations.
+    let mmap = unsafe { boot::exit_boot_services(None) };
 
-    // Convert UEFI memory map to our format.
-    let mmap_ptr = (mmap_entries_phys + HHDM_OFFSET) as *mut MemoryRegion;
+    let mmap_ptr = mmap_entries_phys as *mut MemoryRegion;
     let mut count = 0usize;
-    for desc in mmap.entries() {
+    for desc in UefiMemoryMap::entries(&mmap) {
+        if count >= mmap_capacity {
+            break;
+        }
         let kind = match desc.ty {
             MemoryType::CONVENTIONAL => MemoryKind::Usable,
             MemoryType::BOOT_SERVICES_CODE | MemoryType::BOOT_SERVICES_DATA => {
                 MemoryKind::BootloaderReclaimable
             }
-            MemoryType::LOADER_CODE | MemoryType::LOADER_DATA => MemoryKind::KernelAndModules,
+            MemoryType::LOADER_CODE | MemoryType::LOADER_DATA => {
+                MemoryKind::BootloaderReclaimable
+            }
             MemoryType::ACPI_RECLAIM => MemoryKind::AcpiReclaimable,
             MemoryType::ACPI_NON_VOLATILE => MemoryKind::AcpiNvs,
             MemoryType::UNUSABLE => MemoryKind::BadMemory,
@@ -116,14 +124,14 @@ fn efi_main(image: Handle, mut st: SystemTable<Boot>) -> Status {
         count += 1;
     }
 
-    // Fill BootInfo.
+    let mmap_virt = (mmap_entries_phys + HHDM_OFFSET) as *const MemoryRegion;
     let info = BootInfo {
         magic: BOOT_INFO_MAGIC,
         version: BOOT_INFO_VERSION,
         _pad0: 0,
         framebuffer: fb,
         memory_map: MemoryMap {
-            entries: mmap_ptr as *const _,
+            entries: mmap_virt,
             count,
         },
         rsdp_phys: rsdp,
@@ -131,11 +139,9 @@ fn efi_main(image: Handle, mut st: SystemTable<Boot>) -> Status {
         cmdline_len: 0,
         hhdm_offset: HHDM_OFFSET,
     };
-    let info_ptr = (boot_info_phys + HHDM_OFFSET) as *mut BootInfo;
-    unsafe { ptr::write(info_ptr, info) };
+    unsafe { ptr::write(boot_info_phys as *mut BootInfo, info) };
+    let info_virt = (boot_info_phys + HHDM_OFFSET) as *const BootInfo;
 
-    // Switch CR3 and jump into the kernel. The kernel receives &BootInfo in
-    // rdi per the SysV AMD64 ABI.
     unsafe {
         Cr3::write(
             PhysFrame::from_start_address(PhysAddr::new(pml4_phys)).unwrap(),
@@ -148,7 +154,7 @@ fn efi_main(image: Handle, mut st: SystemTable<Boot>) -> Status {
             "jmp {entry}",
             stack = in(reg) stack_top_virt,
             entry = in(reg) entry_point,
-            in("rdi") info_ptr as u64,
+            in("rdi") info_virt as u64,
             options(noreturn)
         );
     }
@@ -158,17 +164,13 @@ fn efi_main(image: Handle, mut st: SystemTable<Boot>) -> Status {
 // Framebuffer
 // ---------------------------------------------------------------------------
 
-fn init_framebuffer(bt: &BootServices) -> Framebuffer {
-    let handle = bt
-        .get_handle_for_protocol::<GraphicsOutput>()
-        .expect("locate GOP handle");
-    let mut gop = bt
-        .open_protocol_exclusive::<GraphicsOutput>(handle)
-        .expect("open GOP");
+fn init_framebuffer() -> Framebuffer {
+    let handle = boot::get_handle_for_protocol::<GraphicsOutput>().expect("locate GOP handle");
+    let mut gop: ScopedProtocol<GraphicsOutput> =
+        boot::open_protocol_exclusive::<GraphicsOutput>(handle).expect("open GOP");
 
-    // Pick the largest mode that has an RGB/BGR pixel format.
     let mut best: Option<(usize, (u32, u32), GopPixelFormat)> = None;
-    for (idx, mode) in gop.modes(bt).enumerate() {
+    for (idx, mode) in gop.modes().enumerate() {
         let info = mode.info();
         let (w, h) = info.resolution();
         let pf = info.pixel_format();
@@ -176,12 +178,12 @@ fn init_framebuffer(bt: &BootServices) -> Framebuffer {
             continue;
         }
         let px = w as u64 * h as u64;
-        if best.map_or(true, |(_, (bw, bh), _)| (bw as u64 * bh as u64) < px) {
+        if best.is_none_or(|(_, (bw, bh), _)| (bw as u64 * bh as u64) < px) {
             best = Some((idx, (w as u32, h as u32), pf));
         }
     }
     if let Some((idx, _, _)) = best {
-        let mode = gop.modes(bt).nth(idx).unwrap();
+        let mode = gop.modes().nth(idx).unwrap();
         gop.set_mode(&mode).expect("set GOP mode");
     }
 
@@ -195,7 +197,6 @@ fn init_framebuffer(bt: &BootServices) -> Framebuffer {
     };
     let mut fb_buf = gop.frame_buffer();
     let base_phys = fb_buf.as_mut_ptr() as u64;
-    // The kernel accesses the framebuffer through the HHDM; convert now.
     let base_virt = (base_phys + HHDM_OFFSET) as *mut u8;
 
     Framebuffer {
@@ -212,13 +213,12 @@ fn init_framebuffer(bt: &BootServices) -> Framebuffer {
 // Kernel loading
 // ---------------------------------------------------------------------------
 
-fn load_kernel(image: Handle, bt: &BootServices) -> Vec<u8> {
-    let mut sfs = bt
-        .get_image_file_system(image)
-        .expect("open image filesystem");
+fn load_kernel() -> Vec<u8> {
+    let image = boot::image_handle();
+    let mut sfs: ScopedProtocol<SimpleFileSystem> =
+        boot::get_image_file_system(image).expect("open image filesystem");
     let mut root = sfs.open_volume().expect("open ESP root");
 
-    // Convert the path to CStr16.
     let mut buf = [0u16; 64];
     let path = CStr16::from_str_with_buf(KERNEL_PATH, &mut buf).expect("kernel path -> CStr16");
 
@@ -227,7 +227,6 @@ fn load_kernel(image: Handle, bt: &BootServices) -> Vec<u8> {
         .expect("open kernel.elf");
     let mut file: RegularFile = file.into_regular_file().expect("kernel.elf is a regular file");
 
-    // Query size.
     let mut info_buf = [0u8; 512];
     let info: &mut FileInfo = file
         .get_info::<FileInfo>(&mut info_buf)
@@ -244,25 +243,22 @@ fn load_kernel(image: Handle, bt: &BootServices) -> Vec<u8> {
 // Paging
 // ---------------------------------------------------------------------------
 
-fn alloc_pages(bt: &BootServices, n: usize) -> u64 {
-    bt.allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, n)
+fn alloc_pages(n: usize) -> u64 {
+    boot::allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, n)
         .expect("allocate_pages")
+        .as_ptr() as u64
 }
 
 fn pages_for(bytes: u64) -> usize {
-    ((bytes + 4095) / 4096) as usize
+    bytes.div_ceil(4096) as usize
 }
 
-/// Build a fresh 4-level page table, returning the physical address of the
-/// PML4 and the highest virtual address of the loaded kernel.
-fn build_page_tables(bt: &BootServices, elf: &ElfFile, fb: &Framebuffer) -> (u64, u64) {
-    let pml4_phys = alloc_pages(bt, 1);
+fn build_page_tables(elf: &ElfFile, fb: &Framebuffer) -> (u64, u64) {
+    let pml4_phys = alloc_pages(1);
     let pml4 = unsafe { &mut *(pml4_phys as *mut PageTable) };
     pml4.zero();
 
-    // Identity map the first IDENTITY_MAP_BYTES with 2 MiB pages.
     map_region_2m(
-        bt,
         pml4,
         0,
         0,
@@ -270,9 +266,7 @@ fn build_page_tables(bt: &BootServices, elf: &ElfFile, fb: &Framebuffer) -> (u64
         PTF::PRESENT | PTF::WRITABLE,
     );
 
-    // HHDM: map all of physical memory (at least the same region) at HHDM_OFFSET.
     map_region_2m(
-        bt,
         pml4,
         HHDM_OFFSET,
         0,
@@ -280,11 +274,9 @@ fn build_page_tables(bt: &BootServices, elf: &ElfFile, fb: &Framebuffer) -> (u64
         PTF::PRESENT | PTF::WRITABLE | PTF::NO_EXECUTE,
     );
 
-    // Framebuffer: also map it through the HHDM explicitly (it may lie above 4 GiB).
     let fb_phys = fb.base as u64 - HHDM_OFFSET;
     let fb_bytes = (fb.pitch as u64) * (fb.height as u64);
     map_region_2m(
-        bt,
         pml4,
         HHDM_OFFSET + (fb_phys & !0x1F_FFFF),
         fb_phys & !0x1F_FFFF,
@@ -292,42 +284,35 @@ fn build_page_tables(bt: &BootServices, elf: &ElfFile, fb: &Framebuffer) -> (u64
         PTF::PRESENT | PTF::WRITABLE | PTF::NO_EXECUTE,
     );
 
-    // Kernel PT_LOAD segments.
     let mut max_virt: u64 = 0;
     for ph in elf.program_iter() {
         if ph.get_type().ok() != Some(PhType::Load) {
             continue;
         }
-        load_segment(bt, pml4, elf, &ph);
+        load_segment(pml4, elf, &ph);
         let end = ph.virtual_addr() + ph.mem_size();
         if end > max_virt {
             max_virt = end;
         }
     }
 
-    // Make sure paging features we rely on are enabled (PAE, NXE).
     unsafe {
-        Cr4::update(|f| f.insert(Cr4Flags::PHYSICAL_ADDRESS_EXTENSION));
         use x86_64::registers::model_specific::{Efer, EferFlags};
         Efer::update(|f| f.insert(EferFlags::NO_EXECUTE_ENABLE));
-        Cr0::update(|f| {
-            f.insert(Cr0Flags::PAGING | Cr0Flags::PROTECTED_MODE_ENABLE | Cr0Flags::WRITE_PROTECT)
-        });
     }
 
     (pml4_phys, max_virt)
 }
 
-fn load_segment(bt: &BootServices, pml4: &mut PageTable, elf: &ElfFile, ph: &ProgramHeader) {
+fn load_segment(pml4: &mut PageTable, elf: &ElfFile, ph: &ProgramHeader) {
     let virt = ph.virtual_addr();
     let file_size = ph.file_size();
     let mem_size = ph.mem_size();
     let file_off = ph.offset();
 
     let pages = pages_for(mem_size + (virt & 0xFFF));
-    let seg_phys = alloc_pages(bt, pages);
+    let seg_phys = alloc_pages(pages);
 
-    // Zero and copy file contents.
     unsafe {
         ptr::write_bytes(seg_phys as *mut u8, 0, pages * 4096);
         let src = elf.input.as_ptr().add(file_off as usize);
@@ -346,76 +331,58 @@ fn load_segment(bt: &BootServices, pml4: &mut PageTable, elf: &ElfFile, ph: &Pro
 
     let virt_start = virt & !0xFFF;
     let length = pages as u64 * 4096;
-    map_region_4k(bt, pml4, virt_start, seg_phys, length, flags);
+    map_region_4k(pml4, virt_start, seg_phys, length, flags);
 }
 
 fn align_up(x: u64, a: u64) -> u64 {
     (x + a - 1) & !(a - 1)
 }
 
-fn map_region_4k(
-    bt: &BootServices,
-    pml4: &mut PageTable,
-    virt: u64,
-    phys: u64,
-    length: u64,
-    flags: PTF,
-) {
+fn map_region_4k(pml4: &mut PageTable, virt: u64, phys: u64, length: u64, flags: PTF) {
     let mut off = 0u64;
     while off < length {
         let v = VirtAddr::new(virt + off);
         let p = phys + off;
-        let pt = walk_to_pt(bt, pml4, v);
+        let pt = walk_to_pt(pml4, v);
         let idx = ((v.as_u64() >> 12) & 0x1FF) as usize;
         pt[idx].set_addr(PhysAddr::new(p), flags);
         off += 4096;
     }
 }
 
-fn map_region_2m(
-    bt: &BootServices,
-    pml4: &mut PageTable,
-    virt: u64,
-    phys: u64,
-    length: u64,
-    flags: PTF,
-) {
+fn map_region_2m(pml4: &mut PageTable, virt: u64, phys: u64, length: u64, flags: PTF) {
     let mut off = 0u64;
     let huge = flags | PTF::HUGE_PAGE;
     while off < length {
         let v = VirtAddr::new(virt + off);
         let p = phys + off;
-        let pd = walk_to_pd(bt, pml4, v);
+        let pd = walk_to_pd(pml4, v);
         let idx = ((v.as_u64() >> 21) & 0x1FF) as usize;
         pd[idx].set_addr(PhysAddr::new(p), huge);
         off += 2 * 1024 * 1024;
     }
 }
 
-fn walk_to_pd<'a>(bt: &BootServices, pml4: &'a mut PageTable, v: VirtAddr) -> &'a mut PageTable {
+fn walk_to_pd(pml4: &mut PageTable, v: VirtAddr) -> &mut PageTable {
     let pml4_idx = ((v.as_u64() >> 39) & 0x1FF) as usize;
-    let pdpt = ensure_child(bt, &mut pml4[pml4_idx]);
+    let pdpt = ensure_child(&mut pml4[pml4_idx]);
     let pdpt_idx = ((v.as_u64() >> 30) & 0x1FF) as usize;
-    ensure_child(bt, &mut pdpt[pdpt_idx])
+    ensure_child(&mut pdpt[pdpt_idx])
 }
 
-fn walk_to_pt<'a>(bt: &BootServices, pml4: &'a mut PageTable, v: VirtAddr) -> &'a mut PageTable {
-    let pd = walk_to_pd(bt, pml4, v);
+fn walk_to_pt(pml4: &mut PageTable, v: VirtAddr) -> &mut PageTable {
+    let pd = walk_to_pd(pml4, v);
     let pd_idx = ((v.as_u64() >> 21) & 0x1FF) as usize;
-    ensure_child(bt, &mut pd[pd_idx])
+    ensure_child(&mut pd[pd_idx])
 }
 
-fn ensure_child<'a>(
-    bt: &BootServices,
-    entry: &'a mut x86_64::structures::paging::page_table::PageTableEntry,
-) -> &'a mut PageTable {
+fn ensure_child(
+    entry: &mut x86_64::structures::paging::page_table::PageTableEntry,
+) -> &mut PageTable {
     if entry.is_unused() {
-        let frame = alloc_pages(bt, 1);
+        let frame = alloc_pages(1);
         unsafe { ptr::write_bytes(frame as *mut u8, 0, 4096) };
-        entry.set_addr(
-            PhysAddr::new(frame),
-            PTF::PRESENT | PTF::WRITABLE | PTF::USER_ACCESSIBLE,
-        );
+        entry.set_addr(PhysAddr::new(frame), PTF::PRESENT | PTF::WRITABLE);
     }
     let child_phys = entry.addr().as_u64();
     unsafe { &mut *(child_phys as *mut PageTable) }
@@ -425,15 +392,23 @@ fn ensure_child<'a>(
 // ACPI RSDP
 // ---------------------------------------------------------------------------
 
-fn find_rsdp(st: &SystemTable<Boot>) -> u64 {
+fn find_rsdp() -> u64 {
     let mut acpi1 = 0u64;
-    for entry in st.config_table() {
-        if entry.guid == ACPI2_GUID {
-            return entry.address as u64;
+    let acpi2 = system::with_config_table(|slice| {
+        for entry in slice {
+            if entry.guid == ConfigTableEntry::ACPI2_GUID {
+                return entry.address as u64;
+            }
+            if entry.guid == ConfigTableEntry::ACPI_GUID {
+                acpi1 = entry.address as u64;
+            }
         }
-        if entry.guid == ACPI_GUID {
-            acpi1 = entry.address as u64;
-        }
+        0
+    });
+    if acpi2 != 0 {
+        acpi2
+    } else {
+        acpi1
     }
-    acpi1
 }
+

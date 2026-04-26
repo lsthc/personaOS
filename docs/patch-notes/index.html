@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>personaOS — Patch Notes</title>
+<link rel="stylesheet" href="style.css?v=8" />
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <a class="brand" href="./">
+      <span class="dot"></span>
+      <span class="name notranslate" translate="no">personaOS</span>
+    </a>
+    <nav>
+      <a class="pill current" href="./">Patch Notes</a>
+      <div id="google_translate_element" class="translate-slot"></div>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="hero">
+    <p class="kicker">Release log</p>
+    <h1>Patch Notes</h1>
+    <p class="lede">
+      Every personaOS build, in order. Click a release to read the full
+      notes.
+    </p>
+  </section>
+
+  <section id="app" class="stack">
+    <p id="status" class="muted">Loading releases…</p>
+    <ol id="release-list" class="releases" hidden></ol>
+  </section>
+
+  <article id="release-view" class="release-view" hidden>
+    <button id="back" type="button" class="back">← All releases</button>
+    <div id="release-body"></div>
+  </article>
+
+</main>
+
+<script src="md.js"></script>
+<script src="app.js"></script>
+<script>
+  function googleTranslateElementInit() {
+    new google.translate.TranslateElement(
+      {
+        pageLanguage: "en",
+        includedLanguages: "en,ko,ja,zh-CN,zh-TW,es,fr,de,ru,pt,it,vi,th,id",
+        layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
+        autoDisplay: false,
+      },
+      "google_translate_element"
+    );
+  }
+</script>
+<script src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit" async></script>
+</body>
+</html>

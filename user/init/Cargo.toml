@@ -1,0 +1,22 @@
+[workspace]
+
+[package]
+name = "init"
+version = "0.1.0"
+edition = "2021"
+authors = ["personaOS contributors"]
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "init"
+path = "src/main.rs"
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+lto = false
+codegen-units = 1

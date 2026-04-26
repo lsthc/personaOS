@@ -1,0 +1,527 @@
+:root {
+  color-scheme: dark;
+
+  /* Surface */
+  --bg: #171717;
+  --bg-elev: #0f0f0f;
+  --bg-elev-2: #1e1e1e;
+
+  /* Borders */
+  --border-subtle: #242424;
+  --border: #2e2e2e;
+  --border-strong: #363636;
+  --border-prominent: #393939;
+
+  /* Text */
+  --text: #fafafa;
+  --text-secondary: #b4b4b4;
+  --text-muted: #898989;
+  --text-dim: #4d4d4d;
+
+  /* Brand */
+  --brand: #3ecf8e;
+  --brand-link: #00c573;
+  --brand-border: rgba(62, 207, 142, 0.3);
+
+  /* Semantic */
+  --danger: #ff6369;
+
+  /* Type */
+  --sans: "Circular", custom-font, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono: "Source Code Pro", "Office Code Pro", Menlo, ui-monospace, Consolas, monospace;
+
+  /* Shape */
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --pill: 9999px;
+}
+
+* { box-sizing: border-box; }
+
+html {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: none;
+  scroll-behavior: smooth;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.50;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ---- Hide scrollbars on desktop (PC) while preserving scroll ---- */
+/* Detect PC via fine pointer + hover support; mobile keeps native behavior. */
+@media (hover: hover) and (pointer: fine) {
+  body {
+    scrollbar-width: none;       /* Firefox */
+    -ms-overflow-style: none;    /* legacy Edge / IE */
+  }
+  body::-webkit-scrollbar {      /* Chrome / Safari / new Edge */
+    width: 0;
+    height: 0;
+    display: none;
+  }
+
+  /* any nested scroll container (e.g. code blocks that overflow-x) */
+  #release-body pre {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  #release-body pre::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Respect user preference: disable smooth scrolling when requested. */
+@media (prefers-reduced-motion: reduce) {
+  html, body { scroll-behavior: auto; }
+}
+
+.wrap {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* ---- masthead ---- */
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(23, 23, 23, 0.84);
+  backdrop-filter: saturate(1.4) blur(12px);
+  -webkit-backdrop-filter: saturate(1.4) blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.masthead .wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: normal;
+}
+.brand .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--brand);
+}
+nav .pill {
+  padding: 8px 14px;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+}
+nav .pill.current {
+  color: var(--text);
+  background: var(--bg-elev);
+  border-color: var(--border-strong);
+}
+nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ---- google translate widget ---- */
+.translate-slot .goog-te-gadget {
+  font-family: var(--sans) !important;
+  font-size: 0 !important;
+  color: transparent !important;
+}
+.translate-slot .goog-te-gadget * {
+  color: var(--text-secondary);
+}
+.translate-slot .goog-te-gadget-simple {
+  background: var(--bg-elev) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--pill) !important;
+  padding: 6px 14px !important;
+  line-height: 1 !important;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.translate-slot .goog-te-gadget-simple:hover {
+  border-color: var(--border-prominent) !important;
+}
+.translate-slot .goog-te-gadget-simple .goog-te-menu-value {
+  color: var(--text-secondary) !important;
+  font-family: var(--sans) !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  margin: 0 !important;
+}
+.translate-slot .goog-te-gadget-simple .goog-te-menu-value span {
+  color: inherit !important;
+  border: 0 !important;
+  text-decoration: none !important;
+}
+.translate-slot .goog-te-gadget-simple img { display: none !important; }
+.translate-slot .goog-te-gadget-icon { display: none !important; }
+
+/* kill google's top banner + body offset */
+body { top: 0 !important; }
+.goog-te-banner-frame,
+.skiptranslate > iframe:first-child { display: none !important; }
+.goog-tooltip, .goog-tooltip:hover { display: none !important; }
+.goog-text-highlight {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* safety net: never translate identifiers/code */
+code, pre, kbd, samp, var,
+.notranslate, [translate="no"] {
+  font-family: var(--mono);
+}
+code font, pre font, .notranslate font, [translate="no"] font {
+  font: inherit !important;
+  color: inherit !important;
+  background: inherit !important;
+  vertical-align: baseline !important;
+}
+
+/* ---- locked / scheduled release card ---- */
+.release-card--locked {
+  cursor: not-allowed;
+  background: var(--bg-elev);
+  border-style: dashed;
+  border-color: var(--border-strong);
+}
+.release-card--locked:hover {
+  border-color: var(--border-strong);
+}
+.release-card--locked .codename {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+.release-card--locked .build {
+  margin-left: auto;
+}
+.release-card--locked .countdown {
+  font-family: var(--mono);
+  font-size: 32px;
+  line-height: 1.1;
+  color: var(--text);
+  margin: 12px 0 4px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* ---- inline spoiler placeholder (server-locked) ---- */
+.spoiler-locked {
+  display: inline-block;
+  vertical-align: baseline;
+  width: 6em;
+  height: 0.9em;
+  border-radius: var(--radius-sm);
+  background: repeating-linear-gradient(
+    135deg,
+    #242424 0 6px,
+    #2e2e2e 6px 12px
+  );
+  border: 1px solid var(--border);
+  color: transparent;
+  user-select: none;
+}
+
+/* ---- hero ---- */
+.hero {
+  padding: 96px 0 48px;
+}
+.hero .kicker {
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-size: 12px;
+  line-height: 1.33;
+  color: var(--text-muted);
+  margin: 0 0 16px;
+  font-weight: 400;
+}
+.hero h1 {
+  font-size: 72px;
+  line-height: 1.00;
+  margin: 0 0 20px;
+  letter-spacing: normal;
+  font-weight: 400;
+  color: var(--text);
+}
+.hero .lede {
+  color: var(--text-secondary);
+  max-width: 60ch;
+  font-size: 18px;
+  line-height: 1.56;
+  font-weight: 400;
+  margin: 0;
+}
+.hero code {
+  font-family: var(--mono);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.stack > * + * { margin-top: 16px; }
+
+.muted { color: var(--text-muted); }
+
+/* ---- release list ---- */
+.releases {
+  list-style: none;
+  padding: 0;
+  margin: 32px 0 128px;
+  display: grid;
+  gap: 12px;
+}
+.release-card {
+  display: block;
+  text-align: left;
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 120ms ease;
+  font: inherit;
+}
+.release-card:hover {
+  border-color: var(--brand-border);
+}
+.release-card:focus-visible {
+  outline: none;
+  border-color: var(--brand);
+}
+.release-card .row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.release-card .build {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.33;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.release-card .codename {
+  font-size: 24px;
+  line-height: 1.33;
+  letter-spacing: -0.16px;
+  font-weight: 400;
+  color: var(--text);
+}
+.release-card .version {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1;
+  color: var(--brand-link);
+  padding: 4px 10px;
+  border-radius: var(--pill);
+  border: 1px solid var(--brand-border);
+  background: transparent;
+}
+.release-card .date {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.release-card .summary {
+  color: var(--text-secondary);
+  margin: 10px 0 0;
+  font-size: 15px;
+  line-height: 1.50;
+}
+
+/* ---- release detail ---- */
+.release-view {
+  padding: 64px 0 128px;
+}
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: var(--pill);
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.14;
+  cursor: pointer;
+  margin-bottom: 32px;
+}
+.back:hover {
+  color: var(--text);
+  border-color: var(--border-prominent);
+}
+
+#release-body h1, #release-body h2, #release-body h3 {
+  line-height: 1.25;
+  font-weight: 400;
+}
+#release-body h1 {
+  font-size: 48px;
+  line-height: 1.10;
+  margin: 0 0 12px;
+  letter-spacing: -0.5px;
+  color: var(--text);
+}
+#release-body .meta {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  margin-bottom: 40px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+#release-body .meta .tag {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: var(--pill);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+#release-body h2 {
+  font-size: 24px;
+  line-height: 1.33;
+  letter-spacing: -0.16px;
+  margin: 48px 0 12px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+}
+#release-body h2:first-of-type { border-top: none; padding-top: 0; margin-top: 32px; }
+#release-body h3 {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.33;
+  margin: 28px 0 8px;
+  color: var(--brand-link);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-weight: 400;
+}
+#release-body p, #release-body li {
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.50;
+}
+#release-body p { color: var(--text-secondary); }
+#release-body ul { padding-left: 22px; }
+#release-body li {
+  margin: 6px 0;
+  color: var(--text-secondary);
+}
+#release-body li::marker { color: var(--text-dim); }
+#release-body strong { color: var(--text); font-weight: 500; }
+#release-body code {
+  font-family: var(--mono);
+  font-size: 0.875em;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+#release-body pre {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  overflow-x: auto;
+  line-height: 1.50;
+}
+#release-body pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+#release-body a {
+  color: var(--brand-link);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 120ms ease;
+}
+#release-body a:hover { border-bottom-color: var(--brand-link); }
+
+/* ---- footer ---- */
+.foot {
+  border-top: 1px solid var(--border);
+  padding: 32px 0 48px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.43;
+}
+.foot code {
+  font-family: var(--mono);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ---- small screens ---- */
+@media (max-width: 600px) {
+  .hero { padding: 56px 0 32px; }
+  .hero h1 { font-size: 44px; }
+  #release-body h1 { font-size: 32px; }
+  .release-card .date { margin-left: 0; width: 100%; }
+  .releases { margin-bottom: 64px; }
+  .release-view { padding: 32px 0 64px; }
+}

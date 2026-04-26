@@ -21,8 +21,10 @@ fi
 
 ESP_IMG="$BUILD/esp.img"
 DISK_IMG="$BUILD/disk.img"
+POND_IMG="$BUILD/pond.img"
 ESP_SIZE_MB=64
 DISK_SIZE_MB=96
+POND_SIZE_MB=32
 
 # --- Build ESP (FAT32) -----------------------------------------------------
 rm -f "$ESP_IMG"
@@ -44,8 +46,28 @@ sgdisk --clear \
        --change-name=1:"EFI System" \
        "$DISK_IMG" >/dev/null
 
-# Copy the ESP into partition 1. `sgdisk --info=1` prints start LBA.
-START_LBA=$(sgdisk --info=1 "$DISK_IMG" | awk '/First sector/ {print $3}')
+# Partition 1 starts at LBA 2048 because that's what we passed to --new
+# above. Avoid parsing `sgdisk --info` whose output varies by version.
+START_LBA=2048
 dd if="$ESP_IMG" of="$DISK_IMG" bs=512 seek="$START_LBA" conv=notrunc status=none
 
 echo "disk image: $DISK_IMG"
+
+# --- Build PondFS backing image + format + seed ----------------------------
+MKPONDFS="$ROOT/tools/mkpondfs/target/release/mkpondfs"
+if [[ ! -x "$MKPONDFS" ]]; then
+    (cd "$ROOT/tools/mkpondfs" && cargo build --release >/dev/null)
+fi
+
+POND_SRC="$BUILD/pondfs-src"
+rm -rf "$POND_SRC"
+mkdir -p "$POND_SRC"
+
+# Stage the payload we want on the filesystem.
+cp "$ROOT/user/init/target/x86_64-personaos-user/release/init" "$POND_SRC/init"
+printf 'hello from pond\n' > "$POND_SRC/hello.txt"
+
+rm -f "$POND_IMG"
+truncate -s ${POND_SIZE_MB}M "$POND_IMG"
+"$MKPONDFS" "$POND_IMG" "$POND_SRC"
+echo "pond image: $POND_IMG"

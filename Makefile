@@ -3,17 +3,22 @@
 CARGO ?= cargo
 BUILD_DIR := build
 
-.PHONY: all build build-bootloader build-kernel disk run debug clean fmt clippy check
+.PHONY: all build build-bootloader build-kernel build-init disk run debug clean fmt clippy check changelog
 
 all: build
 
-build: build-bootloader build-kernel
+# user/init must be built before the kernel because the kernel
+# `include_bytes!`es the resulting ELF into its image.
+build: build-init build-bootloader build-kernel
 
 build-bootloader:
 	cd bootloader && $(CARGO) build
 
 build-kernel:
 	cd kernel && $(CARGO) build
+
+build-init:
+	cd user/init && $(CARGO) build --release
 
 disk: build
 	./tools/mkdisk.sh
@@ -34,6 +39,9 @@ clippy:
 
 fmt:
 	$(CARGO) fmt --all
+
+changelog:
+	./tools/gen-changelog-manifest.sh
 
 clean:
 	$(CARGO) clean
