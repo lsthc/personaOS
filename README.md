@@ -8,7 +8,7 @@ A desktop operating system built around the person using it — written from scr
 
 > **Yours · Private · Clear**
 
-[Overview](#overview) · [Install](#install) · [Build from source](#build-from-source) · [Architecture](#architecture) · [Roadmap](#roadmap) · [Contributing](#contributing)
+[Overview](#overview) · [Install](#install) · [Build from source](#build-from-source) · [Architecture](#architecture) · [Roadmap](#roadmap) · [Contributing](#contributing) · [Patch Note](https://docs.persona.lxy.rest/docs/patch-notes/)
 
 </div>
 
