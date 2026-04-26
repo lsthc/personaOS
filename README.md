@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://i.postimg.cc/nhCGjTFy/IMG-0698.png" alt="personaOS" />
+<img src="https://raw.githubusercontent.com/lsthc/personaOS/refs/heads/main/images/IMG_0698.png" alt="personaOS" />
 
 # personaOS
 
