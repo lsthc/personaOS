@@ -15,12 +15,13 @@ use alloc::sync::Arc;
 use core::arch::naked_asm;
 use core::cell::UnsafeCell;
 use core::ptr;
-use core::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicI32, AtomicU64, AtomicU8, Ordering};
 
 use spin::Mutex;
 
 use crate::arch::x86_64::gdt;
-use crate::fs::{FdTable, OpenFile, SerialStdout, FD_READ, FD_WRITE};
+use crate::fs::{FdTable, OpenFile, SerialStdout, TtyStdin, FD_READ, FD_WRITE};
+use crate::ipc::{Cap, CapTable};
 use crate::mm::vmm::AddressSpace;
 
 pub type TaskId = u64;
@@ -38,11 +39,14 @@ pub enum TaskState {
 
 pub struct Task {
     id: TaskId,
+    parent: AtomicU64,
+    exit_code: AtomicI32,
     kstack: Box<[u8]>,
     saved_rsp: UnsafeCell<u64>,
     state: AtomicU8,
     addr_space: Mutex<Option<AddressSpace>>,
     fds: Mutex<FdTable>,
+    caps: Mutex<CapTable>,
 }
 
 // SAFETY: `saved_rsp` is touched only by the scheduler with the run-queue
@@ -57,6 +61,15 @@ const KSTACK_SIZE: usize = 16 * 1024;
 impl Task {
     pub fn id(&self) -> TaskId {
         self.id
+    }
+    pub fn parent(&self) -> TaskId {
+        self.parent.load(Ordering::Relaxed)
+    }
+    pub fn exit_code(&self) -> i32 {
+        self.exit_code.load(Ordering::Relaxed)
+    }
+    pub fn set_exit_code(&self, code: i32) {
+        self.exit_code.store(code, Ordering::Relaxed);
     }
     pub fn state(&self) -> TaskState {
         match self.state.load(Ordering::Relaxed) {
@@ -86,6 +99,9 @@ impl Task {
     pub fn fds(&self) -> &Mutex<FdTable> {
         &self.fds
     }
+    pub fn caps(&self) -> &Mutex<CapTable> {
+        &self.caps
+    }
 }
 
 fn new_id() -> TaskId {
@@ -111,7 +127,7 @@ pub fn spawn_idle(entry: extern "C" fn() -> !) -> Arc<Task> {
         let mut sp = top;
         sp -= 8;
         ptr::write(sp as *mut u64, entry as usize as u64); // return addr for `ret`
-        // callee-saved (all zero)
+                                                           // callee-saved (all zero)
         for _ in 0..6 {
             sp -= 8;
             ptr::write(sp as *mut u64, 0);
@@ -121,20 +137,26 @@ pub fn spawn_idle(entry: extern "C" fn() -> !) -> Arc<Task> {
 
     Arc::new(Task {
         id: new_id(),
+        parent: AtomicU64::new(0),
+        exit_code: AtomicI32::new(0),
         kstack,
         saved_rsp: UnsafeCell::new(rsp),
         state: AtomicU8::new(TaskState::Ready as u8),
         addr_space: Mutex::new(None),
         fds: Mutex::new(FdTable::new()),
+        caps: Mutex::new(CapTable::new()),
     })
 }
 
 /// Spawn a user task. `entry_user` and `stack_user` are already mapped in
-/// `address_space`.
+/// `address_space`. `initial_caps` are installed in the new task's cap table
+/// in order; their `CapId`s start at 1.
 pub fn spawn_user(
     address_space: AddressSpace,
     entry_user: u64,
     stack_user: u64,
+    initial_caps: alloc::vec::Vec<Arc<Cap>>,
+    parent_pid: TaskId,
 ) -> Arc<Task> {
     let sel = gdt::selectors();
     let user_cs = sel.user_code.0 as u64 | 3;
@@ -148,13 +170,19 @@ pub fn spawn_user(
     let rsp = unsafe {
         let mut sp = top;
         // IRETQ frame, pushed in reverse pop order (SS, RSP, RFLAGS, CS, RIP).
-        sp -= 8; ptr::write(sp as *mut u64, user_ss);
-        sp -= 8; ptr::write(sp as *mut u64, stack_user);
-        sp -= 8; ptr::write(sp as *mut u64, user_rflags);
-        sp -= 8; ptr::write(sp as *mut u64, user_cs);
-        sp -= 8; ptr::write(sp as *mut u64, entry_user);
+        sp -= 8;
+        ptr::write(sp as *mut u64, user_ss);
+        sp -= 8;
+        ptr::write(sp as *mut u64, stack_user);
+        sp -= 8;
+        ptr::write(sp as *mut u64, user_rflags);
+        sp -= 8;
+        ptr::write(sp as *mut u64, user_cs);
+        sp -= 8;
+        ptr::write(sp as *mut u64, entry_user);
         // Return address for the switch routine's final `ret`: enter_user.
-        sp -= 8; ptr::write(sp as *mut u64, enter_user as *const () as u64);
+        sp -= 8;
+        ptr::write(sp as *mut u64, enter_user as *const () as u64);
         // Callee-saved registers (zeroed).
         for _ in 0..6 {
             sp -= 8;
@@ -164,19 +192,27 @@ pub fn spawn_user(
     };
 
     let mut fds = FdTable::new();
+    let stdin = OpenFile::new(Arc::new(TtyStdin) as _, FD_READ);
     let stdout = OpenFile::new(Arc::new(SerialStdout) as _, FD_WRITE);
-    let stdin = OpenFile::new(Arc::new(SerialStdout) as _, FD_READ);
     fds.install_at(0, stdin);
     fds.install_at(1, stdout.clone());
     fds.install_at(2, stdout);
 
+    let mut caps = CapTable::new();
+    for c in initial_caps {
+        caps.install(c);
+    }
+
     Arc::new(Task {
         id: new_id(),
+        parent: AtomicU64::new(parent_pid),
+        exit_code: AtomicI32::new(0),
         kstack,
         saved_rsp: UnsafeCell::new(rsp),
         state: AtomicU8::new(TaskState::Ready as u8),
         addr_space: Mutex::new(Some(address_space)),
         fds: Mutex::new(fds),
+        caps: Mutex::new(caps),
     })
 }
 
@@ -185,7 +221,5 @@ pub fn spawn_user(
 /// its final `ret`, with RSP pointing at the frame.
 #[unsafe(naked)]
 unsafe extern "C" fn enter_user() {
-    naked_asm!(
-        "iretq",
-    );
+    naked_asm!("iretq",);
 }

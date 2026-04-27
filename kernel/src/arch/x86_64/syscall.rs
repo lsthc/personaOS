@@ -2,10 +2,14 @@
 //!
 //! Userland enters the kernel by executing `syscall`. The CPU loads CS/SS
 //! from `STAR`, RIP from `LSTAR`, and masks the flags in `SFMASK`. Our entry
-//! stub saves the user context onto the per-CPU kernel stack and hands off
-//! to a Rust dispatcher; on return we restore and `sysretq` back to ring 3.
+//! stub saves the user context onto the current task's kernel stack and hands
+//! off to a Rust dispatcher; on return we restore and `sysretq` back to ring 3.
 
 use core::arch::naked_asm;
+
+use core::sync::atomic::{AtomicU64, Ordering};
+
+use x86_64::VirtAddr;
 
 use crate::arch::x86_64::{gdt, rdmsr, wrmsr};
 
@@ -15,6 +19,13 @@ const IA32_LSTAR: u32 = 0xC000_0082;
 const IA32_FMASK: u32 = 0xC000_0084;
 
 const EFER_SCE: u64 = 1 << 0;
+
+static SYSCALL_STACK_TOP: AtomicU64 = AtomicU64::new(0);
+static USER_RSP_SCRATCH: AtomicU64 = AtomicU64::new(0);
+
+pub fn set_kernel_stack(top: VirtAddr) {
+    SYSCALL_STACK_TOP.store(top.as_u64(), Ordering::Relaxed);
+}
 
 /// Program the SYSCALL MSRs on the BSP.
 ///
@@ -27,7 +38,7 @@ pub unsafe fn init_bsp() {
     // for SS, so `user_base` must refer to user_DATA in the GDT.
     let kernel_cs = sel.kernel_code.0 as u64;
     let user_base = sel.user_data.0 as u64 - 8; // subtract ring bits so the
-    // +8/+16 offsets land on user_data (ring 3) and user_code (ring 3).
+                                                // +8/+16 offsets land on user_data (ring 3) and user_code (ring 3).
 
     unsafe {
         wrmsr(IA32_EFER, rdmsr(IA32_EFER) | EFER_SCE);
@@ -38,20 +49,21 @@ pub unsafe fn init_bsp() {
     }
 }
 
-/// Assembly entry for `syscall`. Runs in ring 0 with the user's RSP still in
-/// RSP; we swap to the per-CPU kernel stack via `swapgs` + GS-relative load,
-/// but for M1 we cheat and use the TSS's RSP0 by pulling it from a scratch
-/// MSR we set up earlier — even simpler: just call the dispatcher on the
-/// user stack. Works for the tiny init-blob payloads that M1 runs; a real
-/// implementation needs per-CPU stack swizzling.
+/// Assembly entry for `syscall`.
 ///
 /// # Safety
-/// Only invoked by the CPU via `syscall`. Assumes a valid user RSP and that
-/// kernel code has been entered from CPL 3.
+/// Only invoked by the CPU via `syscall`. Assumes a valid current task and
+/// that the scheduler has published its kernel stack top.
 #[unsafe(naked)]
 #[no_mangle]
 pub unsafe extern "C" fn syscall_entry() {
     naked_asm!(
+        // RSP is still the userspace stack here. Move to the current task's
+        // kernel stack before touching user memory so syscalls survive CR3 switches.
+        "mov qword ptr [rip + {user_rsp}], rsp",
+        "mov rsp, qword ptr [rip + {stack_top}]",
+        "and rsp, -16",
+        "push qword ptr [rip + {user_rsp}]",
         // Stash user RCX (return RIP) and R11 (flags) — the CPU put them
         // there for us, but we save them on the stack so the dispatcher can
         // clobber.
@@ -97,7 +109,10 @@ pub unsafe extern "C" fn syscall_entry() {
         "pop rdi",
         "pop r11",
         "pop rcx",
+        "pop rsp",
         "sysretq",
         dispatch = sym crate::syscall::dispatch,
+        stack_top = sym SYSCALL_STACK_TOP,
+        user_rsp = sym USER_RSP_SCRATCH,
     );
 }

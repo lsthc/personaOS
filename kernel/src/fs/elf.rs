@@ -23,9 +23,7 @@ pub enum ElfError {
 /// virtual address.
 ///
 /// # Safety
-/// Momentarily switches CR3 to `address_space` to copy segment bytes into
-/// the user mapping, then restores the kernel AS. Must be called with
-/// interrupts disabled, in kernel mode, before the task is runnable.
+/// Must be called in kernel mode before the target task is runnable.
 pub unsafe fn load(bytes: &[u8], address_space: &AddressSpace) -> Result<u64, ElfError> {
     let elf = ElfFile::new(bytes).map_err(|_| ElfError::Parse)?;
     let entry = elf.header.pt2.entry_point();
@@ -36,7 +34,17 @@ pub unsafe fn load(bytes: &[u8], address_space: &AddressSpace) -> Result<u64, El
             continue;
         }
         match ph {
-            ProgramHeader::Ph64(p) => unsafe { load_seg(&elf, p.virtual_addr, p.offset, p.file_size, p.mem_size, p.flags.0, address_space)? },
+            ProgramHeader::Ph64(p) => unsafe {
+                load_seg(
+                    &elf,
+                    p.virtual_addr,
+                    p.offset,
+                    p.file_size,
+                    p.mem_size,
+                    p.flags.0,
+                    address_space,
+                )?
+            },
             ProgramHeader::Ph32(_) => return Err(ElfError::Parse),
         }
     }
@@ -69,20 +77,12 @@ unsafe fn load_seg(
     as_.map_anon(aligned_virt, pages, map_flags | MapFlags::WRITE)
         .map_err(|_| ElfError::Map)?;
 
-    // Temporarily switch to the user AS to copy bytes through the userspace
-    // virtual addresses. This is the same trick user::spawn_init used for the
-    // raw blob — the user AS also contains the kernel's higher-half mapping
-    // (new_user clones kernel PML4 entries) so code and stack remain valid.
-    unsafe {
-        let prev_cr3 = x86_64::registers::control::Cr3::read().0;
-        as_.activate();
-        let src = elf.input.as_ptr().add(file_off as usize);
-        let dst = virt as *mut u8;
-        core::ptr::write_bytes(dst, 0, mem_size as usize);
-        core::ptr::copy_nonoverlapping(src, dst, file_size as usize);
-        use x86_64::registers::control::{Cr3, Cr3Flags};
-        Cr3::write(prev_cr3, Cr3Flags::empty());
-    }
+    as_.zero_user(virt, mem_size as usize)
+        .map_err(|_| ElfError::Copy)?;
+    let start = file_off as usize;
+    let end = start + file_size as usize;
+    as_.copy_to_user(virt, &elf.input[start..end])
+        .map_err(|_| ElfError::Copy)?;
 
     Ok(())
 }

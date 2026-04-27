@@ -1,0 +1,13 @@
+[package]
+name = "lily"
+version = "0.1.0"
+edition = "2021"
+authors = ["personaOS contributors"]
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+libpersona = { path = "../libpersona" }
+skipstone = { path = "../skipstone" }
+
+[lib]
+path = "src/lib.rs"

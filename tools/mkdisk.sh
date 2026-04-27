@@ -64,8 +64,77 @@ rm -rf "$POND_SRC"
 mkdir -p "$POND_SRC"
 
 # Stage the payload we want on the filesystem.
+mkdir -p "$POND_SRC/bin" "$POND_SRC/etc" "$POND_SRC/sbin"
 cp "$ROOT/user/init/target/x86_64-personaos-user/release/init" "$POND_SRC/init"
+cp "$ROOT/user/vfsd/target/x86_64-personaos-user/release/vfsd" "$POND_SRC/sbin/vfsd"
+cp "$ROOT/user/netd/target/x86_64-personaos-user/release/netd" "$POND_SRC/sbin/netd"
+cp "$ROOT/user/audiod/target/x86_64-personaos-user/release/audiod" "$POND_SRC/sbin/audiod"
+cp "$ROOT/user/depth/target/x86_64-personaos-user/release/depth" "$POND_SRC/bin/depth"
+cp "$ROOT/user/desktop/target/x86_64-personaos-user/release/desktop" "$POND_SRC/bin/desktop"
+cp "$ROOT/user/drift/target/x86_64-personaos-user/release/drift" "$POND_SRC/bin/drift"
+cp "$ROOT/user/reflection/target/x86_64-personaos-user/release/reflection" "$POND_SRC/bin/reflection"
+cp "$ROOT/user/skim/target/x86_64-personaos-user/release/skim" "$POND_SRC/bin/skim"
+cp "$ROOT/user/shore/target/x86_64-personaos-user/release/shore" "$POND_SRC/bin/shore"
+cp "$ROOT/user/stones/target/x86_64-personaos-user/release/stones" "$POND_SRC/bin/stones"
+cp "$ROOT/user/surface-demo/target/x86_64-personaos-user/release/surface-demo" "$POND_SRC/bin/surface-demo"
+cp "$ROOT/user/tide/target/x86_64-personaos-user/release/tide" "$POND_SRC/bin/tide"
 printf 'hello from pond\n' > "$POND_SRC/hello.txt"
+cat > "$POND_SRC/etc/spring.toml" <<'EOF'
+[[service]]
+label = "com.persona.vfsd"
+path = "/sbin/vfsd"
+keep_alive = true
+
+[[service]]
+label = "com.persona.netd"
+path = "/sbin/netd"
+keep_alive = false
+
+[[service]]
+label = "com.persona.audiod"
+path = "/sbin/audiod"
+keep_alive = false
+
+[[service]]
+label = "com.persona.reflection"
+path = "/bin/reflection"
+keep_alive = false
+
+[[service]]
+label = "com.persona.desktop"
+path = "/bin/desktop"
+keep_alive = false
+
+[[service]]
+label = "com.persona.tide"
+path = "/bin/tide"
+keep_alive = false
+
+[[service]]
+label = "com.persona.skim"
+path = "/bin/skim"
+keep_alive = false
+
+[[service]]
+label = "com.persona.stones"
+path = "/bin/stones"
+keep_alive = false
+
+[[service]]
+label = "com.persona.drift"
+path = "/bin/drift"
+keep_alive = false
+
+[[service]]
+label = "com.persona.surface-demo"
+path = "/bin/surface-demo"
+keep_alive = false
+
+[[service]]
+label = "com.persona.depth"
+path = "/bin/depth"
+keep_alive = false
+EOF
 
 rm -f "$POND_IMG"
 truncate -s ${POND_SIZE_MB}M "$POND_IMG"

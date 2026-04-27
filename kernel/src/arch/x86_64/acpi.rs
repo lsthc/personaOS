@@ -89,8 +89,7 @@ pub unsafe fn init(rsdp_phys: u64) {
     }
     let entries_bytes = xsdt.length as usize - mem::size_of::<SdtHeader>();
     let entries = entries_bytes / 8;
-    let entry_ptr =
-        (xsdt_phys + HHDM_OFFSET + mem::size_of::<SdtHeader>() as u64) as *const u64;
+    let entry_ptr = (xsdt_phys + HHDM_OFFSET + mem::size_of::<SdtHeader>() as u64) as *const u64;
 
     let mut mcfg_found: Option<Mcfg> = None;
     for i in 0..entries {

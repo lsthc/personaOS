@@ -84,7 +84,10 @@ fn resolve_mount(path: &str) -> Option<(Arc<dyn Filesystem>, String)> {
             && (mp.ends_with('/') || path.as_bytes().get(mp.len()) == Some(&b'/'))
         {
             let rest = &path[mp.len()..];
-            return Some((fs.clone(), String::from(if rest.is_empty() { "/" } else { rest })));
+            return Some((
+                fs.clone(),
+                String::from(if rest.is_empty() { "/" } else { rest }),
+            ));
         }
     }
     None
@@ -133,7 +136,11 @@ pub struct OpenFile {
 
 impl OpenFile {
     pub fn new(inode: Arc<dyn Inode>, flags: u32) -> Arc<Self> {
-        Arc::new(Self { inode, offset: AtomicU64::new(0), flags })
+        Arc::new(Self {
+            inode,
+            offset: AtomicU64::new(0),
+            flags,
+        })
     }
 }
 
@@ -155,7 +162,10 @@ impl Default for FdTable {
 
 impl FdTable {
     pub const fn new() -> Self {
-        Self { slots: BTreeMap::new(), next: 0 }
+        Self {
+            slots: BTreeMap::new(),
+            next: 0,
+        }
     }
 
     pub fn install(&mut self, open: Arc<OpenFile>) -> i32 {
@@ -183,28 +193,110 @@ impl FdTable {
     }
 }
 
-// The "stdio" inode: writing goes to the serial console. Reading returns 0
-// (EOF) until we wire up a real console device.
+pub struct TtyStdin;
+
+impl Inode for TtyStdin {
+    fn kind(&self) -> InodeKind {
+        InodeKind::File
+    }
+    fn size(&self) -> u64 {
+        0
+    }
+    fn read_at(&self, _off: u64, buf: &mut [u8]) -> Result<usize, FsError> {
+        let mut n = 0;
+        while n < buf.len() {
+            let b = crate::drivers::ps2::read_byte_blocking();
+            match b {
+                b'\n' => {
+                    buf[n] = b'\n';
+                    n += 1;
+                    tty_echo(b'\n');
+                    break;
+                }
+                0x08 => {
+                    if n > 0 {
+                        n -= 1;
+                        tty_echo(0x08);
+                    }
+                }
+                b if (0x20..=0x7E).contains(&b) || b == b'\t' => {
+                    buf[n] = b;
+                    n += 1;
+                    tty_echo(b);
+                }
+                _ => {}
+            }
+        }
+        Ok(n)
+    }
+    fn write_at(&self, _off: u64, _buf: &[u8]) -> Result<usize, FsError> {
+        Err(FsError::Unsupported)
+    }
+    fn lookup(&self, _name: &str) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotDir)
+    }
+    fn readdir(&self) -> Result<Vec<(String, InodeKind)>, FsError> {
+        Err(FsError::NotDir)
+    }
+    fn create(&self, _name: &str, _kind: InodeKind) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotDir)
+    }
+    fn unlink(&self, _name: &str) -> Result<(), FsError> {
+        Err(FsError::NotDir)
+    }
+}
+
+fn tty_echo(b: u8) {
+    let mut serial = unsafe { crate::drivers::serial::SerialPort::new(0x3F8) };
+    match b {
+        b'\n' => {
+            serial.write_byte(b'\r');
+            serial.write_byte(b'\n');
+        }
+        0x08 => {
+            serial.write_byte(0x08);
+            serial.write_byte(b' ');
+            serial.write_byte(0x08);
+        }
+        b => serial.write_byte(b),
+    }
+}
+
+// The stdout/stderr inode: writing goes to the serial console.
 pub struct SerialStdout;
 
 impl Inode for SerialStdout {
-    fn kind(&self) -> InodeKind { InodeKind::File }
-    fn size(&self) -> u64 { 0 }
+    fn kind(&self) -> InodeKind {
+        InodeKind::File
+    }
+    fn size(&self) -> u64 {
+        0
+    }
     fn read_at(&self, _off: u64, _buf: &mut [u8]) -> Result<usize, FsError> {
         Ok(0)
     }
     fn write_at(&self, _off: u64, buf: &[u8]) -> Result<usize, FsError> {
         let mut serial = unsafe { crate::drivers::serial::SerialPort::new(0x3F8) };
         for &b in buf {
-            let out = if (0x20..=0x7E).contains(&b) || b == b'\n' { b } else { b'.' };
+            let out = if (0x20..=0x7E).contains(&b) || b == b'\n' {
+                b
+            } else {
+                b'.'
+            };
             serial.write_byte(out);
         }
         Ok(buf.len())
     }
-    fn lookup(&self, _name: &str) -> Result<Arc<dyn Inode>, FsError> { Err(FsError::NotDir) }
-    fn readdir(&self) -> Result<Vec<(String, InodeKind)>, FsError> { Err(FsError::NotDir) }
+    fn lookup(&self, _name: &str) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotDir)
+    }
+    fn readdir(&self) -> Result<Vec<(String, InodeKind)>, FsError> {
+        Err(FsError::NotDir)
+    }
     fn create(&self, _name: &str, _kind: InodeKind) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotDir)
     }
-    fn unlink(&self, _name: &str) -> Result<(), FsError> { Err(FsError::NotDir) }
+    fn unlink(&self, _name: &str) -> Result<(), FsError> {
+        Err(FsError::NotDir)
+    }
 }

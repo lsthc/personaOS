@@ -60,8 +60,10 @@ pub fn enumerate() {
                                 let _ = writeln!(
                                     &mut serial,
                                     "[pci]   BAR{} {} addr={:#x} size={:#x}",
-                                    i, if b.io { "io  " } else { "mmio" },
-                                    b.base, b.size,
+                                    i,
+                                    if b.io { "io  " } else { "mmio" },
+                                    b.base,
+                                    b.size,
                                 );
                             }
                         }
@@ -90,7 +92,9 @@ pub fn all() -> Vec<Arc<Device>> {
 /// the NVMe / xHCI drivers to locate their controller.
 #[allow(dead_code)] // used by M2.3 / M2.5
 pub fn find_class(class: u8, subclass: u8, prog_if: u8) -> Option<Arc<Device>> {
-    DEVICES.lock().iter().find(|d| {
-        d.class == class && d.subclass == subclass && d.prog_if == prog_if
-    }).cloned()
+    DEVICES
+        .lock()
+        .iter()
+        .find(|d| d.class == class && d.subclass == subclass && d.prog_if == prog_if)
+        .cloned()
 }

@@ -66,6 +66,24 @@ pub unsafe fn outw(port: u16, val: u16) {
 }
 
 #[inline(always)]
+#[allow(dead_code)]
+pub unsafe fn inl(port: u16) -> u32 {
+    let val: u32;
+    unsafe {
+        asm!("in eax, dx", out("eax") val, in("dx") port, options(nomem, nostack, preserves_flags));
+    }
+    val
+}
+
+#[inline(always)]
+#[allow(dead_code)]
+pub unsafe fn outl(port: u16, val: u32) {
+    unsafe {
+        asm!("out dx, eax", in("dx") port, in("eax") val, options(nomem, nostack, preserves_flags));
+    }
+}
+
+#[inline(always)]
 pub unsafe fn rdmsr(msr: u32) -> u64 {
     let (low, high): (u32, u32);
     unsafe {

@@ -103,9 +103,7 @@ fn efi_main() -> Status {
             MemoryType::BOOT_SERVICES_CODE | MemoryType::BOOT_SERVICES_DATA => {
                 MemoryKind::BootloaderReclaimable
             }
-            MemoryType::LOADER_CODE | MemoryType::LOADER_DATA => {
-                MemoryKind::BootloaderReclaimable
-            }
+            MemoryType::LOADER_CODE | MemoryType::LOADER_DATA => MemoryKind::BootloaderReclaimable,
             MemoryType::ACPI_RECLAIM => MemoryKind::AcpiReclaimable,
             MemoryType::ACPI_NON_VOLATILE => MemoryKind::AcpiNvs,
             MemoryType::UNUSABLE => MemoryKind::BadMemory,
@@ -225,7 +223,9 @@ fn load_kernel() -> Vec<u8> {
     let file = root
         .open(path, FileMode::Read, FileAttribute::empty())
         .expect("open kernel.elf");
-    let mut file: RegularFile = file.into_regular_file().expect("kernel.elf is a regular file");
+    let mut file: RegularFile = file
+        .into_regular_file()
+        .expect("kernel.elf is a regular file");
 
     let mut info_buf = [0u8; 512];
     let info: &mut FileInfo = file
@@ -258,13 +258,7 @@ fn build_page_tables(elf: &ElfFile, fb: &Framebuffer) -> (u64, u64) {
     let pml4 = unsafe { &mut *(pml4_phys as *mut PageTable) };
     pml4.zero();
 
-    map_region_2m(
-        pml4,
-        0,
-        0,
-        IDENTITY_MAP_BYTES,
-        PTF::PRESENT | PTF::WRITABLE,
-    );
+    map_region_2m(pml4, 0, 0, IDENTITY_MAP_BYTES, PTF::PRESENT | PTF::WRITABLE);
 
     map_region_2m(
         pml4,
@@ -411,4 +405,3 @@ fn find_rsdp() -> u64 {
         acpi1
     }
 }
-

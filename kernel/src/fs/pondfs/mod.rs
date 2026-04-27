@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 use spin::Mutex;
 
 use crate::drivers::block::BlockDevice;
-use crate::fs::{FsError, Filesystem, Inode, InodeKind};
+use crate::fs::{Filesystem, FsError, Inode, InodeKind};
 
 use layout::*;
 
@@ -29,11 +29,13 @@ fn lbas_per_block(dev: &dyn BlockDevice) -> u64 {
 }
 
 fn read_block(dev: &dyn BlockDevice, blk: u64, buf: &mut [u8; BLOCK_SIZE]) -> Result<(), FsError> {
-    dev.read_blocks(blk * lbas_per_block(dev), buf).map_err(|_| FsError::Io)
+    dev.read_blocks(blk * lbas_per_block(dev), buf)
+        .map_err(|_| FsError::Io)
 }
 
 fn write_block(dev: &dyn BlockDevice, blk: u64, buf: &[u8; BLOCK_SIZE]) -> Result<(), FsError> {
-    dev.write_blocks(blk * lbas_per_block(dev), buf).map_err(|_| FsError::Io)
+    dev.write_blocks(blk * lbas_per_block(dev), buf)
+        .map_err(|_| FsError::Io)
 }
 
 // ---------------------------------------------------------------------------
@@ -43,7 +45,7 @@ fn write_block(dev: &dyn BlockDevice, blk: u64, buf: &[u8; BLOCK_SIZE]) -> Resul
 struct FsInner {
     dev: Arc<dyn BlockDevice>,
     sb: Superblock,
-    bitmap: Vec<u8>,              // in-memory copy; dirty-flushed on changes
+    bitmap: Vec<u8>, // in-memory copy; dirty-flushed on changes
     inode_cache: BTreeMap<u64, Arc<InodeState>>,
 }
 
@@ -96,7 +98,10 @@ impl PondFs {
             let mut g = inner.lock();
             g.inode_cache.insert(ROOT_INO, root_state.clone());
         }
-        let root = Arc::new(PondInode { fs: inner.clone(), state: root_state });
+        let root = Arc::new(PondInode {
+            fs: inner.clone(),
+            state: root_state,
+        });
 
         Ok(Arc::new(Self { inner, root }))
     }
@@ -125,10 +130,11 @@ fn load_inode(fs: &Arc<Mutex<FsInner>>, ino: u64) -> Result<Arc<InodeState>, FsE
 
     let mut buf = [0u8; BLOCK_SIZE];
     read_block(&*dev, blk, &mut buf)?;
-    let raw = unsafe {
-        *(buf.as_ptr().add(idx * INODE_SIZE) as *const RawInode)
-    };
-    Ok(Arc::new(InodeState { ino, raw: Mutex::new(raw) }))
+    let raw = unsafe { *(buf.as_ptr().add(idx * INODE_SIZE) as *const RawInode) };
+    Ok(Arc::new(InodeState {
+        ino,
+        raw: Mutex::new(raw),
+    }))
 }
 
 fn write_inode(fs: &FsInner, state: &InodeState) -> Result<(), FsError> {
@@ -206,7 +212,9 @@ fn alloc_inode(fs: &mut FsInner) -> Result<u64, FsError> {
         read_block(&*fs.dev, blk, &mut buf)?;
         for i in 0..INODES_PER_BLOCK {
             let ino = blk_off * per_block + i as u64;
-            if ino == 0 { continue; } // reserve inode 0
+            if ino == 0 {
+                continue;
+            } // reserve inode 0
             let raw = unsafe { &*(buf.as_ptr().add(i * INODE_SIZE) as *const RawInode) };
             if raw.kind == INODE_KIND_UNUSED {
                 return Ok(ino);
@@ -303,9 +311,8 @@ fn dir_read_entries(
     read_file_at(fs, raw, 0, &mut buf)?;
     let mut i = 0usize;
     while i + DIR_ENTRY_HEADER_SIZE <= buf.len() {
-        let hdr: DirEntryHeader = unsafe {
-            core::ptr::read_unaligned(buf.as_ptr().add(i) as *const DirEntryHeader)
-        };
+        let hdr: DirEntryHeader =
+            unsafe { core::ptr::read_unaligned(buf.as_ptr().add(i) as *const DirEntryHeader) };
         if hdr.name_len == 0 {
             break;
         }
@@ -349,10 +356,7 @@ fn dir_write_entries(
         let off = buf.len();
         buf.resize(off + DIR_ENTRY_HEADER_SIZE, 0);
         unsafe {
-            core::ptr::write_unaligned(
-                buf.as_mut_ptr().add(off) as *mut DirEntryHeader,
-                hdr,
-            );
+            core::ptr::write_unaligned(buf.as_mut_ptr().add(off) as *mut DirEntryHeader, hdr);
         }
         buf.extend_from_slice(name.as_bytes());
         while !buf.len().is_multiple_of(4) {
@@ -381,7 +385,11 @@ fn dir_write_entries(
 impl Inode for PondInode {
     fn kind(&self) -> InodeKind {
         let raw = self.state.raw.lock();
-        if raw.kind == INODE_KIND_DIR { InodeKind::Dir } else { InodeKind::File }
+        if raw.kind == INODE_KIND_DIR {
+            InodeKind::Dir
+        } else {
+            InodeKind::File
+        }
     }
 
     fn size(&self) -> u64 {
@@ -404,7 +412,13 @@ impl Inode for PondInode {
             return Err(FsError::IsDir);
         }
         let n = write_file_at(&mut fs, &mut raw, off, buf)?;
-        write_inode(&fs, &InodeState { ino: self.state.ino, raw: Mutex::new(*raw) })?;
+        write_inode(
+            &fs,
+            &InodeState {
+                ino: self.state.ino,
+                raw: Mutex::new(*raw),
+            },
+        )?;
         Ok(n)
     }
 
@@ -419,7 +433,10 @@ impl Inode for PondInode {
         for (n, _, ino) in entries {
             if n == name {
                 let state = get_or_load(&self.fs, ino)?;
-                return Ok(Arc::new(PondInode { fs: self.fs.clone(), state }));
+                return Ok(Arc::new(PondInode {
+                    fs: self.fs.clone(),
+                    state,
+                }));
             }
         }
         Err(FsError::NotFound)
@@ -460,16 +477,28 @@ impl Inode for PondInode {
             _pad1: 0,
             direct: [0; DIRECT_BLOCKS],
         };
-        let state = Arc::new(InodeState { ino: new_ino, raw: Mutex::new(new_raw) });
+        let state = Arc::new(InodeState {
+            ino: new_ino,
+            raw: Mutex::new(new_raw),
+        });
         write_inode(&fs, &state)?;
 
         // Update parent directory.
         entries.push((String::from(name), kind, new_ino));
         dir_write_entries(&mut fs, &mut parent_raw, &entries)?;
-        write_inode(&fs, &InodeState { ino: self.state.ino, raw: Mutex::new(*parent_raw) })?;
+        write_inode(
+            &fs,
+            &InodeState {
+                ino: self.state.ino,
+                raw: Mutex::new(*parent_raw),
+            },
+        )?;
 
         fs.inode_cache.insert(new_ino, state.clone());
-        Ok(Arc::new(PondInode { fs: self.fs.clone(), state }))
+        Ok(Arc::new(PondInode {
+            fs: self.fs.clone(),
+            state,
+        }))
     }
 
     fn unlink(&self, name: &str) -> Result<(), FsError> {
@@ -479,7 +508,10 @@ impl Inode for PondInode {
             return Err(FsError::NotDir);
         }
         let mut entries = dir_read_entries(&fs, &parent_raw)?;
-        let pos = entries.iter().position(|(n, _, _)| n == name).ok_or(FsError::NotFound)?;
+        let pos = entries
+            .iter()
+            .position(|(n, _, _)| n == name)
+            .ok_or(FsError::NotFound)?;
         let (_, _, ino) = entries.remove(pos);
 
         // Free the unlinked inode's data blocks and mark it unused.
@@ -496,11 +528,23 @@ impl Inode for PondInode {
         raw.link_count = 0;
         let snap = *raw;
         drop(raw);
-        write_inode(&fs, &InodeState { ino, raw: Mutex::new(snap) })?;
+        write_inode(
+            &fs,
+            &InodeState {
+                ino,
+                raw: Mutex::new(snap),
+            },
+        )?;
         fs.inode_cache.remove(&ino);
 
         dir_write_entries(&mut fs, &mut parent_raw, &entries)?;
-        write_inode(&fs, &InodeState { ino: self.state.ino, raw: Mutex::new(*parent_raw) })?;
+        write_inode(
+            &fs,
+            &InodeState {
+                ino: self.state.ino,
+                raw: Mutex::new(*parent_raw),
+            },
+        )?;
         Ok(())
     }
 }

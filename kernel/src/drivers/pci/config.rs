@@ -98,6 +98,15 @@ impl Device {
         let status_hi = self.read_u32(0x04) & 0xFFFF_0000;
         self.write_u32(0x04, status_hi | cmd);
     }
+
+    /// Enable I/O port space + bus-master for legacy PCI devices such as AC97.
+    #[allow(dead_code)]
+    pub fn enable_io_bus_master(&self) {
+        let mut cmd = self.read_u32(0x04) & 0xFFFF;
+        cmd |= 0x0001 /* IO_SPACE */ | 0x0004 /* BUS_MASTER */;
+        let status_hi = self.read_u32(0x04) & 0xFFFF_0000;
+        self.write_u32(0x04, status_hi | cmd);
+    }
 }
 
 /// Probe one (bus, dev, func). Returns `Some(device)` iff a function is
@@ -151,13 +160,7 @@ pub fn probe(base: u64, bus: u8, dev: u8, func: u8) -> Option<Device> {
 /// Read BAR `index`, probing its size via the classic write-all-ones trick.
 /// Returns the parsed BAR (if any) and the next index to consume: 64-bit BARs
 /// take two slots.
-fn read_bar(
-    base: u64,
-    bus: u8,
-    dev: u8,
-    func: u8,
-    index: usize,
-) -> (Option<Bar>, usize) {
+fn read_bar(base: u64, bus: u8, dev: u8, func: u8, index: usize) -> (Option<Bar>, usize) {
     let off = 0x10 + (index as u16) * 4;
     let orig = read_u32(base, bus, dev, func, off);
     if orig == 0 {
@@ -170,7 +173,12 @@ fn read_bar(
         write_u32(base, bus, dev, func, off, orig);
         let size = (!probed).wrapping_add(1) as u64;
         return (
-            Some(Bar { base: (orig & 0xFFFF_FFFC) as u64, size, io: true, prefetchable: false }),
+            Some(Bar {
+                base: (orig & 0xFFFF_FFFC) as u64,
+                size,
+                io: true,
+                prefetchable: false,
+            }),
             index + 1,
         );
     }
@@ -190,7 +198,12 @@ fn read_bar(
         let size = (!masked).wrapping_add(1);
         let addr = ((orig_hi as u64) << 32) | (orig & 0xFFFF_FFF0) as u64;
         (
-            Some(Bar { base: addr, size, io: false, prefetchable }),
+            Some(Bar {
+                base: addr,
+                size,
+                io: false,
+                prefetchable,
+            }),
             index + 2,
         )
     } else {
@@ -200,7 +213,12 @@ fn read_bar(
         write_u32(base, bus, dev, func, off, orig);
         let size = (!(probed as u64)).wrapping_add(1) & 0xFFFF_FFFF;
         (
-            Some(Bar { base: (orig & 0xFFFF_FFF0) as u64, size, io: false, prefetchable }),
+            Some(Bar {
+                base: (orig & 0xFFFF_FFF0) as u64,
+                size,
+                io: false,
+                prefetchable,
+            }),
             index + 1,
         )
     }

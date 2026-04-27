@@ -23,6 +23,7 @@ extern crate alloc;
 mod arch;
 mod drivers;
 mod fs;
+mod ipc;
 mod mm;
 mod panic;
 mod sched;
@@ -33,7 +34,6 @@ use core::fmt::Write as _;
 
 use persona_shared::{BootInfo, BOOT_INFO_MAGIC, BOOT_INFO_VERSION};
 
-use crate::drivers::framebuffer::FramebufferConsole;
 use crate::drivers::serial::SerialPort;
 
 /// # Safety
@@ -84,6 +84,11 @@ pub unsafe extern "sysv64" fn _start(info: *const BootInfo) -> ! {
         arch::x86_64::acpi::init(info.rsdp_phys);
     }
     drivers::pci::enumerate();
+    let gpu = drivers::virtio_gpu::discover();
+    drivers::e1000::init_from_pci();
+    drivers::ac97::init_from_pci();
+    drivers::ps2::init();
+    let _ = serial.write_str("[input] PS/2 keyboard initialized\n");
 
     // Bring up the first NVMe controller, if any.
     let nvme = drivers::nvme::init_from_pci();
@@ -119,22 +124,33 @@ pub unsafe extern "sysv64" fn _start(info: *const BootInfo) -> ! {
         user::seed_init_into_vfs();
     }
 
-    // Paint the framebuffer so the screen has the M1 banner.
-    let mut fb = unsafe { FramebufferConsole::new(info.framebuffer) };
-    fb.clear(0x0B1020);
-    fb.draw_string(32, 32, "personaOS booted", 0xE6E6FA);
-    fb.draw_string(32, 56, "M1 - kernel: sched + ring-3 + syscalls", 0x9FB4FF);
+    // Paint the framebuffer so the screen has the current boot status.
+    drivers::framebuffer::init(info.framebuffer);
+    if let Some(gpu) = gpu {
+        let _ = writeln!(
+            serial,
+            "[graphics] VirtIO-GPU candidate {:02x}:{:02x}.{} BAR0={:#x} size={:#x}; framebuffer backend active",
+            gpu.bus, gpu.device, gpu.function, gpu.bar0_base, gpu.bar0_size,
+        );
+    } else {
+        let _ = serial.write_str("[graphics] framebuffer backend active\n");
+    }
+    let _ = drivers::framebuffer::clear(0x0B1020);
+    let _ = drivers::framebuffer::draw_text(32, 32, b"personaOS booted", 0xE6E6FA);
+    let _ = drivers::framebuffer::draw_text(32, 56, b"M4 - display syscalls online", 0x9FB4FF);
 
     // Idle task so the run queue is never empty.
     let idle = sched::spawn_idle(idle_task);
+    sched::register(&idle);
     sched::enqueue(idle);
 
-    // First user task.
+    // First user task: Spring, still loaded from the stable `/init` boot path.
     let init = user::spawn_init();
-    let _ = writeln!(serial, "[kernel] spawning init pid={}", init.id());
+    sched::register(&init);
+    let _ = writeln!(serial, "[kernel] spawning Spring pid={}", init.id());
     sched::enqueue(init);
 
-    let _ = serial.write_str("[kernel] M1 milestone reached, entering scheduler.\n");
+    let _ = serial.write_str("[kernel] M3 userspace bring-up, entering scheduler.\n");
     // NOTE: interrupts stay OFF until idle_task enables them. Turning them
     // on before the very first context-bootstrap asm means a timer tick
     // can fire inside `run()` and leave IF=0 after the `ret` into idle.

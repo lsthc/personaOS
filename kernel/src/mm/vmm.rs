@@ -117,7 +117,7 @@ impl AddressSpace {
     /// Must be invoked with interrupts disabled during a task switch, and the
     /// address space must contain a valid copy of the kernel's higher half.
     pub unsafe fn activate(&self) {
-        use x86_64::registers::control::{Cr3Flags, Cr3 as Cr3Reg};
+        use x86_64::registers::control::{Cr3 as Cr3Reg, Cr3Flags};
         use x86_64::structures::paging::PhysFrame;
         unsafe {
             Cr3Reg::write(
@@ -183,7 +183,182 @@ impl AddressSpace {
         x86_64::instructions::tlb::flush(x86_64::VirtAddr::new(virt));
         Some(phys)
     }
+
+    /// Return the physical address backing `virt` in this address space,
+    /// preserving the 4 KiB page offset.
+    pub fn phys_for_virt(&self, virt: u64) -> Option<u64> {
+        let pml4 = pml4_ref(self.pml4_phys);
+        let e1 = &pml4[pml4_idx(virt)];
+        if !e1.flags().contains(PTF::PRESENT) {
+            return None;
+        }
+        let pdpt = unsafe { &*((e1.addr().as_u64() + HHDM_OFFSET) as *const PageTable) };
+        let e2 = &pdpt[pdpt_idx(virt)];
+        if !e2.flags().contains(PTF::PRESENT) {
+            return None;
+        }
+        let pd = unsafe { &*((e2.addr().as_u64() + HHDM_OFFSET) as *const PageTable) };
+        let e3 = &pd[pd_idx(virt)];
+        if !e3.flags().contains(PTF::PRESENT) {
+            return None;
+        }
+        let pt = unsafe { &*((e3.addr().as_u64() + HHDM_OFFSET) as *const PageTable) };
+        let e4 = &pt[pt_idx(virt)];
+        if !e4.flags().contains(PTF::PRESENT) {
+            return None;
+        }
+        Some(e4.addr().as_u64() + (virt & 0xFFF))
+    }
+
+    pub fn copy_to_user(&self, virt: u64, bytes: &[u8]) -> Result<(), MapError> {
+        let mut written = 0usize;
+        while written < bytes.len() {
+            let va = virt + written as u64;
+            let phys = self.phys_for_virt(va).ok_or(MapError::NoVirtualSpace)?;
+            let page_left = PAGE_SIZE - (va as usize & (PAGE_SIZE - 1));
+            let n = page_left.min(bytes.len() - written);
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    bytes.as_ptr().add(written),
+                    (phys + HHDM_OFFSET) as *mut u8,
+                    n,
+                );
+            }
+            written += n;
+        }
+        Ok(())
+    }
+
+    pub fn zero_user(&self, virt: u64, len: usize) -> Result<(), MapError> {
+        let mut done = 0usize;
+        while done < len {
+            let va = virt + done as u64;
+            let phys = self.phys_for_virt(va).ok_or(MapError::NoVirtualSpace)?;
+            let page_left = PAGE_SIZE - (va as usize & (PAGE_SIZE - 1));
+            let n = page_left.min(len - done);
+            unsafe {
+                core::ptr::write_bytes((phys + HHDM_OFFSET) as *mut u8, 0, n);
+            }
+            done += n;
+        }
+        Ok(())
+    }
+
+    /// Check whether the 4 KiB page at `virt` is mapped in this address space.
+    pub fn is_mapped_4k(&self, virt: u64) -> bool {
+        let pml4 = pml4_ref(self.pml4_phys);
+        let e1 = &pml4[pml4_idx(virt)];
+        if !e1.flags().contains(PTF::PRESENT) {
+            return false;
+        }
+        let pdpt = unsafe { &*((e1.addr().as_u64() + HHDM_OFFSET) as *const PageTable) };
+        let e2 = &pdpt[pdpt_idx(virt)];
+        if !e2.flags().contains(PTF::PRESENT) {
+            return false;
+        }
+        let pd = unsafe { &*((e2.addr().as_u64() + HHDM_OFFSET) as *const PageTable) };
+        let e3 = &pd[pd_idx(virt)];
+        if !e3.flags().contains(PTF::PRESENT) {
+            return false;
+        }
+        let pt = unsafe { &*((e3.addr().as_u64() + HHDM_OFFSET) as *const PageTable) };
+        pt[pt_idx(virt)].flags().contains(PTF::PRESENT)
+    }
+
+    /// Detach `pages` 4 KiB pages starting at `virt` from this address space,
+    /// returning the physical frames. Transactional: if any page in the range
+    /// is unmapped, the already-stolen pages are re-mapped and an error is
+    /// returned.
+    ///
+    /// On success the caller owns the frames — they must eventually be freed
+    /// or handed to another address space via `install_pages`.
+    ///
+    /// # Safety
+    /// Caller must be executing with interrupts disabled or otherwise ensure
+    /// no concurrent access to the range. TLB is flushed for each page.
+    pub unsafe fn steal_pages(
+        &self,
+        virt: u64,
+        pages: usize,
+    ) -> Result<alloc::vec::Vec<u64>, MapError> {
+        if virt & 0xFFF != 0 {
+            return Err(MapError::Misaligned);
+        }
+        let mut out: alloc::vec::Vec<u64> = alloc::vec::Vec::with_capacity(pages);
+        for i in 0..pages {
+            let va = virt + (i * PAGE_SIZE) as u64;
+            let phys = match unsafe { self.unmap_4k(va) } {
+                Some(p) => p,
+                None => {
+                    // Rollback: put the frames we stole back.
+                    for (j, &p) in out.iter().enumerate() {
+                        let back_va = virt + (j * PAGE_SIZE) as u64;
+                        // These PTEs were just cleared; re-map should not fail.
+                        unsafe {
+                            let _ = self.map_4k(
+                                back_va,
+                                p,
+                                MapFlags::WRITE | MapFlags::USER | MapFlags::NX,
+                            );
+                        }
+                    }
+                    return Err(MapError::AlreadyMapped); // "range had a hole"
+                }
+            };
+            out.push(phys);
+        }
+        Ok(out)
+    }
+
+    /// Map `frames` at `virt` in this address space with user R/W (no-X).
+    ///
+    /// # Safety
+    /// `virt` and each frame must be page-aligned. The range must not already
+    /// be mapped.
+    pub unsafe fn install_pages(&self, virt: u64, frames: &[u64]) -> Result<(), MapError> {
+        for (i, &phys) in frames.iter().enumerate() {
+            let va = virt + (i * PAGE_SIZE) as u64;
+            unsafe {
+                self.map_4k(va, phys, MapFlags::WRITE | MapFlags::USER | MapFlags::NX)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Find a contiguous free VA range of `pages` 4 KiB pages in the user half
+    /// of this address space, inside the IPC window. First-fit, aligned to 4 KiB.
+    /// Returns the start address.
+    ///
+    /// The IPC window is `[USER_IPC_BASE, USER_IPC_END)` — a dedicated 1 GiB
+    /// slice of user VA where `ipc_recv` drops page-stolen payloads. Keeping
+    /// it separate from heap and stack makes it easy to reason about lifetimes.
+    pub fn find_user_vm_range(&self, pages: usize) -> Option<u64> {
+        let mut run_start: Option<u64> = None;
+        let mut run = 0usize;
+        let mut va = USER_IPC_BASE;
+        while va + (pages * PAGE_SIZE) as u64 <= USER_IPC_END {
+            if self.is_mapped_4k(va) {
+                run_start = None;
+                run = 0;
+            } else {
+                if run == 0 {
+                    run_start = Some(va);
+                }
+                run += 1;
+                if run == pages {
+                    return run_start;
+                }
+            }
+            va += PAGE_SIZE as u64;
+        }
+        None
+    }
 }
+
+/// User VA window reserved for IPC page-steal deliveries. 1 GiB, well below
+/// the user stack top at 0x7FFF_F000 and above the typical text/heap.
+pub const USER_IPC_BASE: u64 = 0x0000_2000_0000;
+pub const USER_IPC_END: u64 = 0x0000_6000_0000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MapError {
@@ -238,7 +413,9 @@ fn pml4_ref(phys: u64) -> &'static mut PageTable {
 }
 
 #[allow(dead_code)]
-fn child_ref(entry: &x86_64::structures::paging::page_table::PageTableEntry) -> Option<&'static PageTable> {
+fn child_ref(
+    entry: &x86_64::structures::paging::page_table::PageTableEntry,
+) -> Option<&'static PageTable> {
     if !entry.flags().contains(PTF::PRESENT) {
         return None;
     }
@@ -284,7 +461,15 @@ fn ensure_child(
     Ok(unsafe { &mut *((phys + HHDM_OFFSET) as *mut PageTable) })
 }
 
-fn pml4_idx(v: u64) -> usize { ((v >> 39) & 0x1FF) as usize }
-fn pdpt_idx(v: u64) -> usize { ((v >> 30) & 0x1FF) as usize }
-fn pd_idx(v: u64) -> usize { ((v >> 21) & 0x1FF) as usize }
-fn pt_idx(v: u64) -> usize { ((v >> 12) & 0x1FF) as usize }
+fn pml4_idx(v: u64) -> usize {
+    ((v >> 39) & 0x1FF) as usize
+}
+fn pdpt_idx(v: u64) -> usize {
+    ((v >> 30) & 0x1FF) as usize
+}
+fn pd_idx(v: u64) -> usize {
+    ((v >> 21) & 0x1FF) as usize
+}
+fn pt_idx(v: u64) -> usize {
+    ((v >> 12) & 0x1FF) as usize
+}

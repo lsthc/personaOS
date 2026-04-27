@@ -67,7 +67,10 @@ pub unsafe fn init_bsp() {
     }
 
     // Spurious vector + software enable.
-    write(REG_SIVR, 0x100 | crate::arch::x86_64::idt::SPURIOUS_VECTOR as u32);
+    write(
+        REG_SIVR,
+        0x100 | crate::arch::x86_64::idt::SPURIOUS_VECTOR as u32,
+    );
 
     // Calibrate: count LAPIC timer ticks over a known PIT interval (~10 ms).
     write(REG_TIMER_DCR, DCR_DIV_16);

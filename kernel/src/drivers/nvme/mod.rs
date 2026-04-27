@@ -183,8 +183,12 @@ struct NvmeNs {
 }
 
 impl BlockDevice for NvmeNs {
-    fn block_size(&self) -> usize { self.lba_bytes as usize }
-    fn block_count(&self) -> u64 { self.block_count }
+    fn block_size(&self) -> usize {
+        self.lba_bytes as usize
+    }
+    fn block_count(&self) -> u64 {
+        self.block_count
+    }
 
     fn read_blocks(&self, lba: u64, buf: &mut [u8]) -> Result<(), BlockError> {
         if !buf.len().is_multiple_of(self.lba_bytes as usize) {
@@ -256,7 +260,11 @@ impl BlockDevice for NvmeNs {
             let mut g = self.controller.lock();
             let io = g.io.as_mut().ok_or(BlockError::Io)?;
             let (_, status) = io.submit_sync(cmd);
-            if status != 0 { Err(BlockError::Io) } else { Ok(()) }
+            if status != 0 {
+                Err(BlockError::Io)
+            } else {
+                Ok(())
+            }
         };
         pmm::free_frame(frame);
         result
@@ -286,11 +294,19 @@ pub fn init_from_pci() -> Option<Arc<dyn BlockDevice>> {
     create_io_queues(&mut ctrl, &mut serial)?;
 
     let controller = Arc::new(Mutex::new(ctrl));
-    let ns = Arc::new(NvmeNs { controller, nsid, lba_bytes, block_count });
+    let ns = Arc::new(NvmeNs {
+        controller,
+        nsid,
+        lba_bytes,
+        block_count,
+    });
     let _ = writeln!(
         serial,
         "[nvme] ns {} ready: {} blocks × {} B = {} bytes",
-        nsid, block_count, lba_bytes, block_count * lba_bytes as u64,
+        nsid,
+        block_count,
+        lba_bytes,
+        block_count * lba_bytes as u64,
     );
     let ns_dyn: Arc<dyn BlockDevice> = ns.clone();
     crate::drivers::block::register(ns_dyn.clone());
@@ -298,7 +314,12 @@ pub fn init_from_pci() -> Option<Arc<dyn BlockDevice>> {
 }
 
 fn bring_up(mmio: u64) -> Option<Controller> {
-    let mut ctrl = Controller { mmio, admin: dummy_queue(), io: None, doorbell_stride: 0 };
+    let mut ctrl = Controller {
+        mmio,
+        admin: dummy_queue(),
+        io: None,
+        doorbell_stride: 0,
+    };
     // Disable the controller.
     let cc = ctrl.read32(REG_CC);
     if cc & CC_EN != 0 {
@@ -377,7 +398,11 @@ fn identify_controller(ctrl: &mut Controller, serial: &mut SerialPort) -> Option
     let (_, status) = ctrl.admin.submit_sync(cmd);
     if status != 0 {
         pmm::free_frame(buf);
-        let _ = writeln!(serial, "[nvme] identify controller failed status={:#x}", status);
+        let _ = writeln!(
+            serial,
+            "[nvme] identify controller failed status={:#x}",
+            status
+        );
         return None;
     }
     // VID at offset 0, model name at 24..64 (40 bytes).
@@ -386,20 +411,25 @@ fn identify_controller(ctrl: &mut Controller, serial: &mut SerialPort) -> Option
     let did = u16::from_le_bytes([slice[2], slice[3]]);
     let model_raw = &slice[24..64];
     let model = trim_ascii(model_raw);
-    let _ = writeln!(serial, "[nvme] ctrl VID={:04x} DID={:04x} model=\"{}\"", vid, did, model);
+    let _ = writeln!(
+        serial,
+        "[nvme] ctrl VID={:04x} DID={:04x} model=\"{}\"",
+        vid, did, model
+    );
     pmm::free_frame(buf);
     Some(())
 }
 
 fn trim_ascii(bytes: &[u8]) -> &str {
-    let end = bytes.iter().rposition(|&b| b != b' ' && b != 0).map(|i| i + 1).unwrap_or(0);
+    let end = bytes
+        .iter()
+        .rposition(|&b| b != b' ' && b != 0)
+        .map(|i| i + 1)
+        .unwrap_or(0);
     core::str::from_utf8(&bytes[..end]).unwrap_or("?")
 }
 
-fn identify_namespace(
-    ctrl: &mut Controller,
-    serial: &mut SerialPort,
-) -> Option<(u32, u32, u64)> {
+fn identify_namespace(ctrl: &mut Controller, serial: &mut SerialPort) -> Option<(u32, u32, u64)> {
     // Active NSID list.
     let buf = pmm::alloc_frame()?;
     unsafe { core::ptr::write_bytes((buf + HHDM_OFFSET) as *mut u8, 0, PAGE_SIZE) };
@@ -443,7 +473,11 @@ fn identify_namespace(
     let lbads = raw[lbaf_off + 2];
     let lba_bytes = 1u32 << lbads;
     pmm::free_frame(ns_buf);
-    let _ = writeln!(serial, "[nvme] ns={} blocks={} lba={}B", nsid, nsze, lba_bytes);
+    let _ = writeln!(
+        serial,
+        "[nvme] ns={} blocks={} lba={}B",
+        nsid, nsze, lba_bytes
+    );
     Some((nsid, lba_bytes, nsze))
 }
 

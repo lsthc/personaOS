@@ -32,9 +32,8 @@ struct Pmm {
 /// # Safety
 /// Must be called exactly once during early boot, before the heap is online.
 pub unsafe fn init(info: &BootInfo) {
-    let regions = unsafe {
-        core::slice::from_raw_parts(info.memory_map.entries, info.memory_map.count)
-    };
+    let regions =
+        unsafe { core::slice::from_raw_parts(info.memory_map.entries, info.memory_map.count) };
 
     // Total PFNs = ceil(max_phys / PAGE_SIZE). Using the max extent rather
     // than just the usable sum lets us index the bitmap directly by PFN.

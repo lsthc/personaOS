@@ -277,8 +277,8 @@ Manual install, if you prefer:
 ### Common commands
 
 ```
-make build       # build bootloader + kernel
-make disk        # assemble build/disk.img (GPT + ESP + personaboot + kernel)
+make build       # build userspace services + bootloader + kernel
+make disk        # assemble build/disk.img (GPT + ESP + PondFS payloads)
 make run         # boot in QEMU with OVMF, serial to stdio
 make debug       # boot paused; attach with: gdb -ex 'target remote :1234' kernel.elf
 make check       # cargo check both crates
@@ -290,40 +290,96 @@ make clean       # wipe target/ and build/
 The first build fetches crates and compiles `core`, `alloc`, and
 `compiler_builtins` for the custom kernel target. Allow a few minutes.
 
-### What "success" looks like at M0
+### What "success" looks like right now
 
 ```
 $ make run
-[personaboot] hello, world
-[personaboot] framebuffer 1280x800 pitch=5120 bpp=32
-[personaboot] loaded kernel.elf: 128744 bytes
-[personaboot] kernel entry = 0xffffffff80001000
-[personaboot] kernel stack top = 0xffff800000101000
-[personaboot] rsdp = 0x7fbe014
-[personaboot] pml4 @ 0x7f8a000
-[kernel] _start reached
-[kernel] BootInfo OK
-[kernel] M0 milestone reached, halting.
+[pci] 00:02.0  8086:100e  class 02.00.00  bars=2
+[pci] 00:03.0  8086:2415  class 04.01.00  bars=2
+[virtio-gpu] not present; using boot framebuffer
+[net] e1000 at 00:02.0 MAC=52:54:00:12:34:56 link=1
+[audio] AC97 at 00:03.0 nam=0x6000 nabm=0x6400
+[graphics] framebuffer backend active
+[spring] starting pid=0x0000000000000002
+[spring] manifest loaded:
+[spring] manifest services=11
+[spring] fs self-test: /hello.txt
+[spring] hello: hello from pond
+[spring] spawning com.persona.vfsd at /sbin/vfsd
+[vfsd] starting pid=0x0000000000000003
+[vfsd] read /hello.txt: hello from pond
+[vfsd] notify spring -> 0
+[spring] service com.persona.vfsd exited pid=3 status=0
+[spring] spawning com.persona.netd at /sbin/netd
+[netd] starting pid=0x0000000000000004
+[net] DHCPDISCOVER tx
+[net] DHCPOFFER rx ip=10.0.2.15 router=10.0.2.2 dns=10.0.2.3
+[netd] net_configure -> 0 present=1 link=1 configured=1 ip=10.0.2.15 tx=1 rx=1
+[netd] notify spring -> 0
+[spring] service com.persona.netd exited pid=4 status=0
+[spring] spawning com.persona.audiod at /sbin/audiod
+[audiod] starting pid=0x0000000000000005
+[audio] AC97 PCM playback complete frames=8640 rate=48000
+[audiod] audio_play_tone -> 0 present=1 played=1 rate=48000 frames=8640
+[audiod] notify spring -> 0
+[spring] service com.persona.audiod exited pid=5 status=0
+[spring] launching Reflection compositor at /bin/reflection
+[reflection] starting pid=0x0000000000000006
+[reflection] display_info -> 0 2048x2048
+[reflection] surface port cap=1
+[reflection] notify spring -> 0
+[spring] reflection recv -> 0; service com.persona.reflection ready pid=6 surface_cap=5
+[spring] published com.persona.reflection -> 0
+[spring] launching desktop shell at /bin/desktop
+[desktop] starting pid=0x0000000000000007
+[desktop] reflection lookup cap=1
+[desktop] draw desktop -> 0
+[desktop] exiting
+[reflection] drew desktop shell dock_apps=5 status_flags=7 style=Skipstone Body line_height=16
+[reflection] input key=0x0000000000000068
+[reflection] drew Tide launcher results=4 style=Skipstone Body line_height=16
+[reflection] drew Skim file manager entries=4 style=Skipstone Body line_height=16
+[reflection] drew Stones settings toggles=3 style=Skipstone Body line_height=16
+[reflection] drew Drift editor lines=3 style=Skipstone Body line_height=16
+[reflection] drew client surface style=Skipstone Caption line_height=16
+[reflection] shutdown requested
+[spring] service com.persona.reflection exited pid=6 status=0
+[spring] launching Depth terminal at /bin/depth
+[depth] launching Shore at /bin/shore
+[shore] starting pid=0x000000000000000e
+shore> hello
+hello from pond
+shore> exit
+[depth] shore exited pid=14 status=0
+[spring] service com.persona.depth exited pid=13 status=0
+[spring] exiting cleanly
 ```
 
-The QEMU window shows a dark-navy background with two lines of lavender
-text: **personaOS booted** and **M0 — kernel entry reached, framebuffer
-online**.
+The QEMU window shows the boot framebuffer plus Reflection's IPC-driven
+surface drawing, the first macOS-style desktop shell with Dock and menu bar,
+Tide launcher, Skim file manager, Stones settings, and Drift editor smokes,
+while serial output demonstrates Spring's launchd-style service manifest
+parsing, capability IPC, process spawning, PondFS-backed ELF loading,
+framebuffer display syscalls, VirtIO-GPU discovery with framebuffer fallback,
+e1000-backed DHCP on QEMU user networking, AC97 PCM playback captured to
+`build/audio.wav`, pond-surface service lookup, Lily's first surface helper,
+Skipstone text metadata, Reflection's first keyboard input smoke, PS/2-backed
+TTY input, Depth, and the first Shore shell prompt.
 
 ---
 
 ## Roadmap
 
-personaOS is built in six milestones. We are currently at **M0**.
+personaOS is built in staged milestones. **M5 is complete; M6 installer/packages is next**.
 
 | Milestone | Scope | Status |
 |---|---|---|
-| **M0 — Hello, kernel** | `personaboot` + kernel entry + serial + framebuffer | **in progress** |
-| M1 — Core kernel | GDT/IDT, APIC, paging, heap, preemptive scheduler, ring-3, ELF loader, first user process | planned |
-| M2 — Storage & devices | PCI, AHCI/NVMe, xHCI, VFS, PondFS, GPT, PS/2 + USB input | planned |
-| M3 — Userspace | Spring (init), capability IPC, terminal, Shore (shell), users & permissions | planned |
-| M4 — Graphics | VirtIO-GPU driver, pond-surface, Reflection compositor, Skipstone fonts, Lily toolkit | planned |
-| M5 — Desktop | Dock, menu bar, Tide launcher, Skim/Depth/Stones/Drift, networking, audio | planned |
+| **M0 — Hello, kernel** | `personaboot` + kernel entry + serial + framebuffer | done |
+| M1 — Core kernel | GDT/IDT, APIC, paging, heap, preemptive scheduler, ring-3, ELF loader, first user process | done |
+| M2 — Storage & devices | PCI, NVMe, VFS, PondFS RW, real ELF init | done |
+| M3 — Userspace | Spring (PID 1), capability IPC, process lifecycle, PS/2-backed TTY, Depth terminal, Shore shell, libpersona SDK | done |
+| M4 — Graphics | Framebuffer display syscalls, Reflection compositor smoke, first pond-surface IPC client, Lily surface helper, Skipstone text metadata, and VirtIO-GPU discovery/fallback | done |
+| M5 — Desktop | First desktop shell with Dock/menu bar, Reflection keyboard input smoke, Tide launcher, Skim file manager, Stones settings, Drift editor smokes, Depth, e1000 DHCP, and AC97 PCM playback | done |
 | M6 — Installer & packages | Live ISO, guided installer, `.drop` format, Stream package manager | planned |
 | M7+ | Additional hardware, App sandboxing, aarch64 port (Apple Silicon, Raspberry Pi) | future |
 

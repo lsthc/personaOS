@@ -207,10 +207,7 @@ extern "x86-interrupt" fn ex_gpf(frame: InterruptStackFrame, err: u64) {
     report_with_err("#GP general protection", &frame, err);
 }
 
-extern "x86-interrupt" fn ex_page_fault(
-    frame: InterruptStackFrame,
-    err: PageFaultErrorCode,
-) {
+extern "x86-interrupt" fn ex_page_fault(frame: InterruptStackFrame, err: PageFaultErrorCode) {
     let cr2 = Cr2::read();
     let mut s = serial();
     let _ = writeln!(

@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 use spin::Mutex;
 
-use super::{FsError, Filesystem, Inode, InodeKind};
+use super::{Filesystem, FsError, Inode, InodeKind};
 
 struct Entry {
     kind: InodeKind,
@@ -84,7 +84,11 @@ impl Inode for RamInode {
         if g.kind != InodeKind::Dir {
             return Err(FsError::NotDir);
         }
-        g.children.get(name).cloned().map(|c| c as Arc<dyn Inode>).ok_or(FsError::NotFound)
+        g.children
+            .get(name)
+            .cloned()
+            .map(|c| c as Arc<dyn Inode>)
+            .ok_or(FsError::NotFound)
     }
 
     fn readdir(&self) -> Result<Vec<(String, InodeKind)>, FsError> {
@@ -92,7 +96,10 @@ impl Inode for RamInode {
         if g.kind != InodeKind::Dir {
             return Err(FsError::NotDir);
         }
-        Ok(g.children.iter().map(|(n, c)| (n.clone(), c.inner.lock().kind)).collect())
+        Ok(g.children
+            .iter()
+            .map(|(n, c)| (n.clone(), c.inner.lock().kind))
+            .collect())
     }
 
     fn create(&self, name: &str, kind: InodeKind) -> Result<Arc<dyn Inode>, FsError> {
@@ -127,7 +134,9 @@ pub struct RamFs {
 
 impl RamFs {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self { root: RamInode::new_dir() })
+        Arc::new(Self {
+            root: RamInode::new_dir(),
+        })
     }
 
     /// Seed a file at absolute path `path`, creating any missing directories
@@ -145,7 +154,9 @@ impl RamFs {
         }
         let file = match node.lookup(last) {
             Ok(f) => f,
-            Err(_) => node.create(last, InodeKind::File).expect("ramfs: create file"),
+            Err(_) => node
+                .create(last, InodeKind::File)
+                .expect("ramfs: create file"),
         };
         file.write_at(0, bytes).expect("ramfs: seed write");
     }

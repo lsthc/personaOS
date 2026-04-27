@@ -27,6 +27,7 @@ use crate::arch::x86_64::gdt;
 
 static RUN_QUEUE: Mutex<Vec<Arc<Task>>> = Mutex::new(Vec::new());
 static CURRENT: Mutex<Option<Arc<Task>>> = Mutex::new(None);
+static TASKS: Mutex<Vec<Arc<Task>>> = Mutex::new(Vec::new());
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 /// Set from any IRQ context that wants to force a reschedule; cleared by
 /// the scheduler itself.
@@ -39,6 +40,18 @@ static WAIT_QUEUES: Mutex<Vec<(WaitKey, Arc<Task>)>> = Mutex::new(Vec::new());
 
 pub fn enqueue(task: Arc<Task>) {
     RUN_QUEUE.lock().push(task);
+}
+
+pub fn register(task: &Arc<Task>) {
+    TASKS.lock().push(task.clone());
+}
+
+pub fn find_task(pid: TaskId) -> Option<Arc<Task>> {
+    TASKS.lock().iter().find(|t| t.id() == pid).cloned()
+}
+
+pub fn is_child(parent: TaskId, child: TaskId) -> bool {
+    find_task(child).is_some_and(|t| t.parent() == parent)
 }
 
 #[allow(dead_code)]
@@ -151,7 +164,9 @@ unsafe fn prepare_to_run(next: &Task) {
             as_.activate();
         }
     }
-    gdt::set_kernel_stack(x86_64::VirtAddr::new(next.kstack_top()));
+    let top = x86_64::VirtAddr::new(next.kstack_top());
+    gdt::set_kernel_stack(top);
+    crate::arch::x86_64::syscall::set_kernel_stack(top);
 }
 
 /// Save the outgoing task's context and load the incoming one. The trick:
@@ -189,11 +204,13 @@ pub fn preempt_if_needed() {
 }
 
 /// Mark the current task as dead and never schedule it again.
-pub fn current_exit(_code: i32) -> ! {
+pub fn current_exit(code: i32) -> ! {
     {
         let cur = CURRENT.lock();
         if let Some(ref t) = *cur {
+            t.set_exit_code(code);
             t.set_state(TaskState::Dead);
+            wake_all(wait_key(t.parent()));
         }
     }
     // Drop current so `schedule` picks a new task.
@@ -214,6 +231,49 @@ pub fn current_id() -> Option<TaskId> {
 /// poke at per-task state (FD table, address space).
 pub fn current() -> Option<Arc<Task>> {
     CURRENT.lock().clone()
+}
+
+pub fn wait_key(parent_pid: TaskId) -> WaitKey {
+    0x5750_0000_0000_0000usize | parent_pid as usize
+}
+
+pub fn find_exited_child(parent_pid: TaskId, pid: TaskId) -> Option<(TaskId, i32)> {
+    TASKS
+        .lock()
+        .iter()
+        .find(|t| {
+            t.parent() == parent_pid && (pid == 0 || t.id() == pid) && t.state() == TaskState::Dead
+        })
+        .map(|t| (t.id(), t.exit_code()))
+}
+
+pub fn has_child(parent_pid: TaskId, pid: TaskId) -> bool {
+    TASKS
+        .lock()
+        .iter()
+        .any(|t| t.parent() == parent_pid && (pid == 0 || t.id() == pid))
+}
+
+pub fn kill(pid: TaskId, code: i32) -> bool {
+    let target = match find_task(pid) {
+        Some(t) => t,
+        None => return false,
+    };
+    target.set_exit_code(code);
+    target.set_state(TaskState::Dead);
+    {
+        let mut rq = RUN_QUEUE.lock();
+        let mut i = 0;
+        while i < rq.len() {
+            if rq[i].id() == pid {
+                rq.swap_remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
+    wake_all(wait_key(target.parent()));
+    true
 }
 
 /// Park the current task on a wait-queue keyed by `key` and yield the CPU.

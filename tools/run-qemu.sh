@@ -57,6 +57,10 @@ QEMU_ARGS=(
     -m 512M
     -drive if=pflash,format=raw,readonly="$CODE_RO",file="$OVMF_CODE"
     -drive format=raw,file="$DISK"
+    -netdev user,id=net0
+    -device e1000,netdev=net0,mac=52:54:00:12:34:56
+    -audiodev wav,id=audio0,path="$ROOT/build/audio.wav"
+    -device AC97,audiodev=audio0
     -serial stdio
     -no-reboot
     -no-shutdown

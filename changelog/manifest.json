@@ -1,5 +1,29 @@
 [
   {
+    "file": "0006-moonlit-harbor.md",
+    "build": 6,
+    "codename": "Moonlit Harbor",
+    "version": "0.4.0",
+    "date": "2026-04-27",
+    "summary": "M5 desktop lands — macOS-style shell smokes, first apps, Reflection keyboard input, Depth, e1000 DHCP, and AC97 PCM playback."
+  },
+  {
+    "file": "0005-reflection-pool.md",
+    "build": 5,
+    "codename": "Reflection Pool",
+    "version": "0.3.0",
+    "date": "2026-04-27",
+    "summary": "M4 graphics smoke lands — framebuffer display syscalls, Reflection, pond-surface IPC, Lily surface helper, Skipstone text metadata, and VirtIO-GPU discovery/fallback."
+  },
+  {
+    "file": "0004-spring-tide.md",
+    "build": 4,
+    "codename": "Spring Tide",
+    "version": "0.2.0",
+    "date": "2026-04-26",
+    "summary": "M3 userspace lands — Spring, capability IPC, process lifecycle, PS/2-backed TTY, Depth/Shore, and libpersona."
+  },
+  {
     "file": "0003-deep-current.md",
     "build": 3,
     "codename": "Deep Current",

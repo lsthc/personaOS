@@ -1,5 +1,9 @@
+pub mod ac97;
 pub mod block;
+pub mod e1000;
 pub mod framebuffer;
 pub mod nvme;
 pub mod pci;
+pub mod ps2;
 pub mod serial;
+pub mod virtio_gpu;
